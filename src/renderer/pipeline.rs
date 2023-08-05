@@ -29,6 +29,9 @@ pub struct FGraphicsPipeline {
     uniform_view: FBufferView,
     model: FModel,
 
+    render_object1: FRenderObject,
+    render_object2: FRenderObject,
+
     count: u32,
 }
 
@@ -55,10 +58,8 @@ impl FGraphicsPipeline {
 
         // model
         let model = FModel::new(&h, mesh, material.clone());
-
-        // texture
-        let depth_stencil_texture =
-            FTexture::new_and_manage(h, EValueFormat::Depth24Stencil8, BTextureUsages::Attachment);
+        let render_object1 = FRenderObject::new(h, model.clone());
+        let render_object2 = FRenderObject::new(h, model.clone());
 
         // faked
         let default_uniform_buffer = FBuffer::new_and_manage(h, BBufferUsages::Uniform);
@@ -86,7 +87,8 @@ impl FGraphicsPipeline {
             uniform_buffer: default_uniform_buffer,
             uniform_view,
             model,
-
+            render_object1,
+            render_object2,
             count: 0,
         }
     }
@@ -97,6 +99,8 @@ impl FGraphicsPipeline {
         self.count += 1;
         let mat_model: glm::Mat4x4 =
             glm::rotation(self.count as f32 * 0.01, &glm::vec3(0.0, 1.0, 0.0));
+
+        let mat_model_biased = glm::translation(&glm::vec3(3.0, 0.0, 0.0)) * mat_model;
 
         let mat_view = glm::look_at(
             &glm::vec3(3.0, 3.0, 3.0),
@@ -112,15 +116,15 @@ impl FGraphicsPipeline {
             100.0,
         );
 
-        let mut uniform_buffer_data = Vec::new();
-        uniform_buffer_data.extend_from_slice(mat_model.as_slice());
-        uniform_buffer_data.extend_from_slice(mat_view.as_slice());
-        uniform_buffer_data.extend_from_slice(mat_proj.as_slice());
+        // let mut uniform_buffer_data = Vec::new();
+        // uniform_buffer_data.extend_from_slice(mat_model.as_slice());
+        // uniform_buffer_data.extend_from_slice(mat_view.as_slice());
+        // uniform_buffer_data.extend_from_slice(mat_proj.as_slice());
 
-        self.uniform_buffer
-            .borrow_mut()
-            .update_by_array(&uniform_buffer_data);
-        self.uniform_buffer.borrow_mut().resize(1024);
+        // self.uniform_buffer
+        //     .borrow_mut()
+        //     .update_by_array(&uniform_buffer_data);
+        // self.uniform_buffer.borrow_mut().resize(1024);
 
         // draw
 
@@ -139,17 +143,38 @@ impl FGraphicsPipeline {
         let swapchain_image = encoder.get_swapchain_texture();
         let swapchain_image_view = FTextureView::new(swapchain_image.clone());
 
-        self.pass2
-            .set_color_attachment(0, swapchain_image_view.clone());
+        self.pass1.set_color_attachments(vec![FColorAttachment::new(
+            swapchain_image_view.clone(),
+            ELoadOp::Clear,
+            EStoreOp::Store,
+        )]);
+
+        self.pass2.set_color_attachments(vec![FColorAttachment::new(
+            swapchain_image_view.clone(),
+            ELoadOp::Load,
+            EStoreOp::Store,
+        )]);
 
         encoder.set_task_uniform_buffer_view(self.uniform_view.clone());
 
-        // encoder.begin_render_pass(&self.pass1);
-        // self.model.encode(encoder, "depthOnly");
-        // encoder.end_render_pass();
+        self.render_object1
+            .set_transform_model(mat_model.clone())
+            .set_transform_view(mat_view.clone())
+            .set_transform_projection(mat_proj.clone())
+            .update_uniform_buffer();
+
+        self.render_object2
+            .set_transform_model(mat_model_biased.clone())
+            .set_transform_view(mat_view.clone())
+            .set_transform_projection(mat_proj.clone())
+            .update_uniform_buffer();
+
+        encoder.begin_render_pass(&self.pass1);
+        self.render_object1.encode(encoder, "base");
+        encoder.end_render_pass();
 
         encoder.begin_render_pass(&self.pass2);
-        self.model.encode(encoder, "base");
+        self.render_object2.encode(encoder, "base");
         encoder.end_render_pass();
 
         encoder.end_frame();

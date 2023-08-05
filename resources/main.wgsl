@@ -1,3 +1,12 @@
+// #define UNIFORM_BIND_GROUP_Material 0
+// #define UNIFORM_BIND_GROUP_DrawCall 1
+// #define UNIFORM_BIND_GROUP_Pass 2
+// #define UNIFORM_BIND_GROUP_Task 3
+// #define UNIFORM_BIND_GROUP_Global 4
+// 有无 const 语法？
+
+const xx = 0;
+
 struct VertexOut {
     @builtin(position) position : vec4f,
 
@@ -11,15 +20,15 @@ struct FragmentOut {
 };
 
 struct DrawCallUniform {
-    mat_model: mat4x4f,
-    mat_view: mat4x4f,
-    mat_proj: mat4x4f,
+    transform_m: mat4x4f,
+    transform_mv: mat4x4f,
+    transform_mvp: mat4x4f,
 
     // color1: f32,
     // color2: f32,
 };
 
-@group(0) @binding(0) var<uniform> cDrawCall: DrawCallUniform;
+@group(0) @binding(1) var<uniform> cDrawCall: DrawCallUniform;
 
 
 @vertex
@@ -30,7 +39,7 @@ fn vsMain_base(
 ) -> VertexOut {
     // cDrawCall.matrix_projection * 
     var vertex_out: VertexOut;
-    vertex_out.position = cDrawCall.mat_proj * cDrawCall.mat_view * cDrawCall.mat_model * vec4f(pos.xyz, 1);
+    vertex_out.position = cDrawCall.transform_mvp * vec4f(pos.xyz, 1);
     vertex_out.uv0 = uv;
     vertex_out.normal_local = normal;
     
@@ -57,7 +66,7 @@ fn vsMain_depthOnly(
 ) -> VertexOut {
     // cDrawCall.matrix_projection * 
     var vertex_out: VertexOut;
-    vertex_out.position = cDrawCall.mat_proj * cDrawCall.mat_view * cDrawCall.mat_model * vec4f(pos.xyz, 1);
+    vertex_out.position = cDrawCall.transform_mvp * vec4f(pos.xyz, 1);
     vertex_out.uv0 = uv;
     vertex_out.normal_local = normal;
     

@@ -1,6 +1,6 @@
 use bitflags::bitflags;
-use std::collections::HashMap;
-use web_sys::{GpuCanvasContext, GpuTextureDescriptor, GpuTextureFormat};
+use std::{collections::HashMap, default};
+use web_sys::{GpuCanvasContext, GpuLoadOp, GpuStoreOp, GpuTextureDescriptor, GpuTextureFormat};
 
 use crate::{
     check, debug_only, hoo_log,
@@ -12,6 +12,8 @@ use crate::{
 };
 
 use super::{encoder::FWebGPUEncoder, utils::struct_to_bin_string};
+
+use nalgebra_glm as glm;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -378,22 +380,25 @@ impl TGPUResource for FShaderModule {
 pub struct FDrawCommand {
     pub vertex_buffer_view: FBufferView,
     pub index_buffer_view: FBufferView,
-    pub uniform_view: FBufferView,
     pub index_count: u32,
+    pub material_view: FBufferView,
+    pub drawcall_view: FBufferView,
 }
 
 impl FDrawCommand {
     pub fn new(
         vertex_buffer_view: FBufferView,
         index_buffer_view: FBufferView,
-        uniform_view: FBufferView,
         index_count: u32,
+        material_view: FBufferView,
+        drawcall_view: FBufferView,
     ) -> Self {
         let out = Self {
             vertex_buffer_view: vertex_buffer_view,
             index_buffer_view: index_buffer_view,
-            uniform_view: uniform_view,
             index_count: index_count,
+            material_view: material_view,
+            drawcall_view: drawcall_view,
         };
 
         debug_only!(out.check().unwrap());
@@ -418,8 +423,12 @@ impl FDrawCommand {
         &self.vertex_buffer_view
     }
 
-    pub fn get_uniform_buffer_view(&self) -> &FBufferView {
-        &self.uniform_view
+    pub fn get_material_view(&self) -> &FBufferView {
+        &self.material_view
+    }
+
+    pub fn get_drawcall_view(&self) -> &FBufferView {
+        &self.drawcall_view
     }
 
     pub fn get_index_count(&self) -> u32 {
@@ -430,10 +439,73 @@ impl FDrawCommand {
 pub const MAX_N_COLOR_ATTACHMENTS: usize = 4;
 
 #[derive(Clone)]
+pub enum ELoadOp {
+    Load,
+    Clear,
+}
+
+impl Into<GpuLoadOp> for ELoadOp {
+    fn into(self) -> GpuLoadOp {
+        match self {
+            ELoadOp::Load => GpuLoadOp::Load,
+            ELoadOp::Clear => GpuLoadOp::Clear,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum EStoreOp {
+    Store,
+    Discard,
+}
+
+impl Into<GpuStoreOp> for EStoreOp {
+    fn into(self) -> GpuStoreOp {
+        match self {
+            EStoreOp::Store => GpuStoreOp::Store,
+            EStoreOp::Discard => GpuStoreOp::Discard,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub enum FClearValue {
+    #[default]
+    Zero,
+    Float4(f32, f32, f32, f32),
+    Float(f32),
+}
+
+#[derive(Clone)]
+pub struct FColorAttachment {
+    pub texture_view: FTextureView,
+    pub load_op: ELoadOp,
+    pub store_op: EStoreOp,
+    pub clear_color: FClearValue,
+}
+
+impl FColorAttachment {
+    pub fn new(texture_view: FTextureView, load_op: ELoadOp, store_op: EStoreOp) -> Self {
+        Self {
+            texture_view: texture_view,
+            load_op: load_op,
+            store_op: store_op,
+            clear_color: FClearValue::default(),
+        }
+    }
+
+    pub fn set_clear_value(&mut self, clear_value: FClearValue) -> &mut Self {
+        // check: clear value vs texture format
+        self.clear_color = clear_value;
+        self
+    }
+}
+
+#[derive(Clone)]
 pub struct FPass {
     uniform_view: FBufferView,
 
-    color_attachments: [Option<FTextureView>; MAX_N_COLOR_ATTACHMENTS],
+    color_attachments: Vec<FColorAttachment>,
     depth_stencil_attachment: Option<FTextureView>,
 }
 
@@ -442,7 +514,7 @@ impl FPass {
         const NONE_VIEW: Option<FTextureView> = None;
         Self {
             uniform_view: uniform_view,
-            color_attachments: [NONE_VIEW; MAX_N_COLOR_ATTACHMENTS],
+            color_attachments: vec![],
             depth_stencil_attachment: None,
         }
     }
@@ -464,30 +536,13 @@ impl FPass {
         self.depth_stencil_attachment.as_ref()
     }
 
-    pub fn set_color_attachments(
-        &mut self,
-        color_attachments: [Option<FTextureView>; MAX_N_COLOR_ATTACHMENTS],
-    ) -> &mut Self {
+    pub fn set_color_attachments(&mut self, color_attachments: Vec<FColorAttachment>) -> &mut Self {
+        debug_assert!(color_attachments.len() <= MAX_N_COLOR_ATTACHMENTS);
         self.color_attachments = color_attachments;
         self
     }
 
-    pub fn set_color_attachment(
-        &mut self,
-        index: usize,
-        color_attachment: FTextureView,
-    ) -> &mut Self {
-        self.color_attachments[index] = Some(color_attachment);
-        self
-    }
-
-    pub fn clear_color_attachments(&mut self) -> &mut Self {
-        const NONE_VIEW: Option<FTextureView> = None;
-        self.color_attachments = [NONE_VIEW; MAX_N_COLOR_ATTACHMENTS];
-        self
-    }
-
-    pub fn get_color_attachments(&self) -> &[Option<FTextureView>; MAX_N_COLOR_ATTACHMENTS] {
+    pub fn get_color_attachments(&self) -> &Vec<FColorAttachment> {
         &self.color_attachments
     }
 
@@ -652,13 +707,31 @@ pub trait TRenderObject {
     fn encode(&self, encoder: &mut FWebGPUEncoder, pass_variant: &str);
 }
 
+#[repr(packed)]
+struct DrawCallUniform {
+    transform_m: glm::Mat4x4,
+    transform_mv: glm::Mat4x4,
+    transform_mvp: glm::Mat4x4,
+}
+
+impl Default for DrawCallUniform {
+    fn default() -> Self {
+        Self {
+            transform_m: glm::identity(),
+            transform_mv: glm::identity(),
+            transform_mvp: glm::identity(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct FModel {
     mesh: RcMut<FMesh>,
     material: RcMut<FMaterial>,
 }
 
 impl FModel {
-    pub fn new(_: HooEngineRef, mesh: RcMut<FMesh>, material: RcMut<FMaterial>) -> Self {
+    pub fn new(h: HooEngineRef, mesh: RcMut<FMesh>, material: RcMut<FMaterial>) -> Self {
         Self {
             mesh: mesh,
             material: material,
@@ -674,16 +747,74 @@ impl FModel {
     }
 }
 
-impl TRenderObject for FModel {
-    fn encode(&self, encoder: &mut FWebGPUEncoder, pass_variant: &str) {
-        let mesh = self.mesh.borrow();
-        let material = self.material.borrow();
+pub struct FRenderObject {
+    model: FModel,
+    uniform_view: FBufferView,
+
+    transform_m: glm::Mat4x4,
+    transform_v: glm::Mat4x4,
+    transform_p: glm::Mat4x4,
+}
+
+impl FRenderObject {
+    pub fn new(h: HooEngineRef, model: FModel) -> Self {
+        let uniform_buffer = FBuffer::new_and_manage(h, BBufferUsages::Uniform);
+
+        let mut uniform_struct = DrawCallUniform::default();
+        uniform_buffer
+            .borrow_mut()
+            .update_by_struct(&uniform_struct);
+        let uniform_view = FBufferView::new_uniform(uniform_buffer);
+
+        let mut out = Self {
+            model: model,
+            uniform_view: uniform_view,
+            transform_m: glm::identity(),
+            transform_v: glm::identity(),
+            transform_p: glm::identity(),
+        };
+
+        out.update_uniform_buffer();
+
+        out
+    }
+
+    pub fn set_transform_model(&mut self, transform: glm::Mat4x4) -> &mut Self {
+        self.transform_m = transform;
+        self
+    }
+
+    pub fn set_transform_view(&mut self, transform: glm::Mat4x4) -> &mut Self {
+        self.transform_v = transform;
+        self
+    }
+
+    pub fn set_transform_projection(&mut self, transform: glm::Mat4x4) -> &mut Self {
+        self.transform_p = transform;
+        self
+    }
+
+    pub fn update_uniform_buffer(&mut self) {
+        let mut uniform_struct = DrawCallUniform::default();
+        uniform_struct.transform_m = self.transform_m;
+        uniform_struct.transform_mv = self.transform_v * self.transform_m;
+        uniform_struct.transform_mvp = self.transform_p * self.transform_v * self.transform_m;
+        self.uniform_view
+            .get_buffer()
+            .borrow_mut()
+            .update_by_struct(&uniform_struct);
+    }
+
+    pub fn encode(&self, encoder: &mut FWebGPUEncoder, pass_variant: &str) {
+        let mesh = self.model.mesh.borrow();
+        let material = self.model.material.borrow();
 
         let cmd = FDrawCommand::new(
             mesh.get_vertex_buffer_view().clone(),
             mesh.get_index_buffer_view().clone(),
-            material.uniform_view.clone(),
             mesh.get_index_count(),
+            material.uniform_view.clone(),
+            self.uniform_view.clone(),
         );
 
         encoder.setup_pipeline(&material.get_shader_module(pass_variant).unwrap());

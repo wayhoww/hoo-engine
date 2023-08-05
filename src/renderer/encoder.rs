@@ -3,9 +3,12 @@ use wasm_bindgen_futures::JsFuture;
 
 use web_sys::*;
 
-use crate::{renderer::utils::jsarray, utils::types::RcMut, HooEngineRef};
+use crate::{hoo_log, renderer::utils::jsarray, utils::types::RcMut, HooEngineRef};
 
 use super::resource::{FBufferView, FPass, FShaderModule, FTexture};
+
+use strum::*;
+use strum_macros::*;
 
 struct FPipeline {
     // descriptor
@@ -46,13 +49,10 @@ impl FPipeline {
         let color_attachments: Vec<JsValue> = pass
             .get_color_attachments()
             .into_iter()
-            .map(|x| match x {
-                Some(view) => {
-                    let texref = view.get_texture();
-                    let tex = texref.borrow();
-                    JsValue::from(web_sys::GpuColorTargetState::new(tex.get_format().into()))
-                }
-                None => JsValue::null(),
+            .map(|view| {
+                let texref = view.texture_view.get_texture();
+                let tex = texref.borrow();
+                JsValue::from(web_sys::GpuColorTargetState::new(tex.get_format().into()))
             })
             .collect();
 
@@ -84,6 +84,17 @@ impl FPipeline {
     }
 }
 
+// 顺序和 shader 保持一致
+#[derive(EnumCount)]
+#[repr(u32)]
+enum EUniformBufferType {
+    Material,
+    DrawCall,
+    Pass,
+    Task,
+    Global,
+}
+
 pub struct FWebGPUEncoder {
     device: GpuDevice,
     context: GpuCanvasContext,
@@ -97,10 +108,9 @@ pub struct FWebGPUEncoder {
     uniform_buffer_view_global: Option<FBufferView>,
     uniform_buffer_view_task: Option<FBufferView>,
 
-    bind_group_global: Option<GpuBindGroup>,
-    bind_group_task: Option<GpuBindGroup>,
-    bind_group_pass: Option<GpuBindGroup>,
-
+    // bind_group_global: Option<GpuBindGroup>,
+    // bind_group_task: Option<GpuBindGroup>,
+    // bind_group_pass: Option<GpuBindGroup>,
     current_pass: Option<FPass>,
 }
 
@@ -161,10 +171,9 @@ impl FWebGPUEncoder {
             uniform_buffer_view_global: None,
             uniform_buffer_view_task: None,
 
-            bind_group_global: None,
-            bind_group_task: None,
-            bind_group_pass: None,
-
+            // bind_group_global: None,
+            // bind_group_task: None,
+            // bind_group_pass: None,
             current_pass: None,
         }
     }
@@ -183,7 +192,7 @@ impl FWebGPUEncoder {
     }
 
     // 所有 pipeline 的 bind group layout 都是一致的, 若干个 cbuffer + 若干个贴图
-    // cbuffer: DrawCallUniform, PassUniform, TaskUniform, GlobalUniform
+    // cbuffer: MaterialUniform, DrawCallUniform, PassUniform, TaskUniform, GlobalUniform
     // 贴图：固定数量
 
     // DrawCallUniform: 在 DrawCommand 中提供，大小可变
@@ -191,33 +200,48 @@ impl FWebGPUEncoder {
     // TaskUniform: 暂时没想好如何做抽象，先通过 SetTaskUniform 设置。类似于 Viewport 的概念，表示一个完整的渲染管线。
     // GlobalUniform: 通过 SetGlobalUniformBuffer 设置，大小固定
     fn make_bind_group_layouts(device: &GpuDevice) -> Vec<GpuBindGroupLayout> {
-        let mut bind_group_layout_entry_uniform_template = GpuBindGroupLayoutEntry::new(
-            0,
-            gpu_shader_stage::VERTEX | gpu_shader_stage::FRAGMENT | gpu_shader_stage::COMPUTE,
-        );
-        bind_group_layout_entry_uniform_template
-            .buffer(&GpuBufferBindingLayout::new().type_(GpuBufferBindingType::Uniform));
-
-        let mut out = Vec::new();
-
-        // Global, Task, Pass, DrawCall
-        for _ in 0..4 {
-            let mut bind_group_layout_entry_array = Vec::new();
-
-            // uniform buffer
-            let bind_group_layout_entry_uniform = bind_group_layout_entry_uniform_template.clone();
-            bind_group_layout_entry_array.push(bind_group_layout_entry_uniform);
-
-            // textures, etc.
-
-            let bind_group_layout =
-                device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&jsarray(
-                    bind_group_layout_entry_array.as_slice(),
-                )));
-            out.push(bind_group_layout);
+        let mut bind_group_layout_entries = vec![];
+        for i in 0..EUniformBufferType::COUNT {
+            let mut entry = GpuBindGroupLayoutEntry::new(
+                i as u32,
+                gpu_shader_stage::VERTEX | gpu_shader_stage::FRAGMENT | gpu_shader_stage::COMPUTE,
+            );
+            entry.buffer(&GpuBufferBindingLayout::new().type_(GpuBufferBindingType::Uniform));
+            bind_group_layout_entries.push(entry);
         }
+        let out = device.create_bind_group_layout(
+            &GpuBindGroupLayoutDescriptor::new(&jsarray(&bind_group_layout_entries))
+                .label("BindGroup-0"),
+        );
+        return vec![out];
 
-        out
+        // let mut bind_group_layout_entry_uniform_template = GpuBindGroupLayoutEntry::new(
+        //     0,
+        //     gpu_shader_stage::VERTEX | gpu_shader_stage::FRAGMENT | gpu_shader_stage::COMPUTE,
+        // );
+        // bind_group_layout_entry_uniform_template
+        //     .buffer(&GpuBufferBindingLayout::new().type_(GpuBufferBindingType::Uniform));
+
+        // let mut out = Vec::new();
+
+        // // Global, Task, Pass, DrawCall, Material
+        // for _ in EUniformBufferType::VARIANTS {
+        //     let mut bind_group_layout_entry_array = Vec::new();
+
+        //     // uniform buffer
+        //     let bind_group_layout_entry_uniform = bind_group_layout_entry_uniform_template.clone();
+        //     bind_group_layout_entry_array.push(bind_group_layout_entry_uniform);
+
+        //     // textures, etc.
+
+        //     let bind_group_layout =
+        //         device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&jsarray(
+        //             bind_group_layout_entry_array.as_slice(),
+        //         )));
+        //     out.push(bind_group_layout);
+        // }
+
+        // out
     }
 
     fn create_bind_group_entry_of_buffer(
@@ -235,43 +259,43 @@ impl FWebGPUEncoder {
 
     pub fn set_global_uniform_buffer_view(&mut self, buffer: FBufferView) {
         self.uniform_buffer_view_global = Some(buffer);
-        self.update_bind_group_global();
+        // self.update_bind_group_global();
     }
 
     pub fn set_task_uniform_buffer_view(&mut self, buffer: FBufferView) {
         self.uniform_buffer_view_task = Some(buffer);
-        self.update_bind_group_task();
+        // self.update_bind_group_task();
     }
 
-    fn update_bind_group_global(&mut self) {
-        let buffer = self.uniform_buffer_view_global.as_ref().unwrap();
+    // fn update_bind_group_global(&mut self) {
+    //     let buffer = self.uniform_buffer_view_global.as_ref().unwrap();
 
-        let bind_group_entries = [self.create_bind_group_entry_of_buffer(0, buffer)];
+    //     let bind_group_entries = [self.create_bind_group_entry_of_buffer(0, buffer)];
 
-        let bind_group = self
-            .device
-            .create_bind_group(&web_sys::GpuBindGroupDescriptor::new(
-                &jsarray(bind_group_entries.as_slice()),
-                &self.bind_group_layouts[0],
-            ));
+    //     let bind_group = self
+    //         .device
+    //         .create_bind_group(&web_sys::GpuBindGroupDescriptor::new(
+    //             &jsarray(bind_group_entries.as_slice()),
+    //             &self.bind_group_layouts[0],
+    //         ));
 
-        self.bind_group_global = Some(bind_group);
-    }
+    //     self.bind_group_global = Some(bind_group);
+    // }
 
-    fn update_bind_group_task(&mut self) {
-        let buffer = self.uniform_buffer_view_task.as_ref().unwrap();
+    // fn update_bind_group_task(&mut self) {
+    //     let buffer = self.uniform_buffer_view_task.as_ref().unwrap();
 
-        let bind_group_entries = [self.create_bind_group_entry_of_buffer(0, buffer)];
+    //     let bind_group_entries = [self.create_bind_group_entry_of_buffer(0, buffer)];
 
-        let bind_group = self
-            .device
-            .create_bind_group(&web_sys::GpuBindGroupDescriptor::new(
-                &jsarray(bind_group_entries.as_slice()),
-                &self.bind_group_layouts[1],
-            ));
+    //     let bind_group = self
+    //         .device
+    //         .create_bind_group(&web_sys::GpuBindGroupDescriptor::new(
+    //             &jsarray(bind_group_entries.as_slice()),
+    //             &self.bind_group_layouts[1],
+    //         ));
 
-        self.bind_group_task = Some(bind_group);
-    }
+    //     self.bind_group_task = Some(bind_group);
+    // }
 
     pub fn begin_frame(&mut self) {
         debug_assert!(self.encoder.is_none());
@@ -292,24 +316,24 @@ impl FWebGPUEncoder {
             .submit(&jsarray(&[encoder.finish()].as_slice()));
     }
 
-    fn create_pass_bind_group(&mut self, pass: &FPass) {
-        debug_assert!(self.bind_group_pass.is_none());
+    // fn create_pass_bind_group(&mut self, pass: &FPass) {
+    //     debug_assert!(self.bind_group_pass.is_none());
 
-        let bind_group = self.device.create_bind_group(&GpuBindGroupDescriptor::new(
-            &jsarray(
-                [self.create_bind_group_entry_of_buffer(0, pass.get_uniform_buffer_view())]
-                    .as_slice(),
-            ),
-            &self.bind_group_layouts[2],
-        ));
-        self.bind_group_pass = Some(bind_group);
-    }
+    //     let bind_group = self.device.create_bind_group(&GpuBindGroupDescriptor::new(
+    //         &jsarray(
+    //             [self.create_bind_group_entry_of_buffer(0, pass.get_uniform_buffer_view())]
+    //                 .as_slice(),
+    //         ),
+    //         &self.bind_group_layouts[2],
+    //     ));
+    //     self.bind_group_pass = Some(bind_group);
+    // }
 
     pub fn begin_render_pass(&mut self, render_pass: &FPass) {
         debug_assert!(self.pass_encoder.is_none());
         debug_assert!(self.current_pass.is_none());
 
-        self.create_pass_bind_group(render_pass);
+        // self.create_pass_bind_group(render_pass);
         self.current_pass = Some(render_pass.clone());
 
         let encoder = self.encoder.as_ref().unwrap();
@@ -317,18 +341,13 @@ impl FWebGPUEncoder {
         let color_attachments: Vec<_> = render_pass
             .get_color_attachments()
             .into_iter()
-            // TODO: 要求必须连续！
-            .filter(|x| x.is_some())
-            .map(|x| match x.as_ref() {
-                Some(view) => {
-                    let color_attachment = GpuRenderPassColorAttachment::new(
-                        GpuLoadOp::Clear,
-                        GpuStoreOp::Store,
-                        &view.get_device_texture_view(),
-                    );
-                    JsValue::from(color_attachment)
-                }
-                None => JsValue::null(),
+            .map(|x| {
+                let color_attachment = GpuRenderPassColorAttachment::new(
+                    x.load_op.clone().into(),
+                    x.store_op.clone().into(),
+                    &x.texture_view.get_device_texture_view(),
+                );
+                JsValue::from(color_attachment)
             })
             .collect();
 
@@ -361,7 +380,7 @@ impl FWebGPUEncoder {
     pub fn end_render_pass(&mut self) {
         self.pass_encoder.take().unwrap().end();
         self.current_pass.take().unwrap();
-        self.bind_group_pass.take().unwrap();
+        // self.bind_group_pass.take().unwrap();
     }
 
     pub fn setup_pipeline(&mut self, shader_module: &RcMut<FShaderModule>) {
@@ -392,22 +411,39 @@ impl FWebGPUEncoder {
             index_buffer_view.get_size(),
         );
 
-        let drawcall_bindgroup =
-            self.device.create_bind_group(&GpuBindGroupDescriptor::new(
-                &jsarray(
-                    [self.create_bind_group_entry_of_buffer(
-                        0,
-                        draw_command.get_uniform_buffer_view(),
-                    )]
-                    .as_slice(),
-                ),
-                &self.bind_group_layouts[3],
-            ));
+        let bindgroup_0 = self.device.create_bind_group(&GpuBindGroupDescriptor::new(
+            &jsarray(
+                [
+                    self.create_bind_group_entry_of_buffer(
+                        EUniformBufferType::Material as u32,
+                        draw_command.get_material_view(),
+                    ),
+                    self.create_bind_group_entry_of_buffer(
+                        EUniformBufferType::DrawCall as u32,
+                        draw_command.get_drawcall_view(),
+                    ),
+                    self.create_bind_group_entry_of_buffer(
+                        EUniformBufferType::Pass as u32,
+                        self.current_pass
+                            .as_ref()
+                            .unwrap()
+                            .get_uniform_buffer_view(),
+                    ),
+                    self.create_bind_group_entry_of_buffer(
+                        EUniformBufferType::Task as u32,
+                        self.uniform_buffer_view_task.as_ref().unwrap(),
+                    ),
+                    self.create_bind_group_entry_of_buffer(
+                        EUniformBufferType::Global as u32,
+                        self.uniform_buffer_view_global.as_ref().unwrap(),
+                    ),
+                ]
+                .as_slice(),
+            ),
+            &self.bind_group_layouts[0],
+        ));
 
-        pass_encoder.set_bind_group(0, &self.bind_group_global.as_ref().unwrap());
-        pass_encoder.set_bind_group(1, &self.bind_group_task.as_ref().unwrap());
-        pass_encoder.set_bind_group(2, &self.bind_group_pass.as_ref().unwrap());
-        pass_encoder.set_bind_group(3, &drawcall_bindgroup);
+        pass_encoder.set_bind_group(0, &bindgroup_0);
 
         pass_encoder.draw_indexed(draw_command.get_index_count());
     }
