@@ -1,11 +1,11 @@
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+use std::{
+    cell::{Ref, RefMut, RefCell},
+    num::NonZeroU64,
+};
 
-use web_sys::*;
+use crate::{renderer::resource::FClearValue, utils::types::RcMut, HooEngineRef, HooEngineWeak};
 
-use crate::{hoo_log, renderer::utils::jsarray, utils::types::RcMut, HooEngineRef};
-
-use super::resource::{FBufferView, FPass, FShaderModule, FTexture};
+use super::resource::{FBufferView, FDrawCommand, FPass, FShaderModule, FTexture, TGPUResource, EValueFormat};
 
 use strum::*;
 use strum_macros::*;
@@ -22,65 +22,116 @@ impl FPipeline {
     // ensure pass exists in encoder!
     fn create_device_resource_with_pass(
         &mut self,
-        encoder: &mut FWebGPUEncoder,
+        pass_encoder: &mut FPassEncoder,
         shader_module: &RcMut<FShaderModule>,
-    ) -> web_sys::GpuRenderPipeline {
+    ) -> wgpu::RenderPipeline {
         let logical_shader_module = shader_module.borrow();
         let shader_module = logical_shader_module.get_device_module().unwrap();
 
-        let vertex_buffer_layout = web_sys::GpuVertexBufferLayout::new(
-            32.0,
-            &jsarray(&[
-                web_sys::GpuVertexAttribute::new(web_sys::GpuVertexFormat::Float32x3, 0.0, 0),
-                web_sys::GpuVertexAttribute::new(web_sys::GpuVertexFormat::Float32x3, 12.0, 1),
-                web_sys::GpuVertexAttribute::new(web_sys::GpuVertexFormat::Float32x2, 24.0, 2),
-            ]),
-        );
+        let vertex_buffer_layout = wgpu::VertexBufferLayout {
+            array_stride: 32,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 12,
+                    shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 24,
+                    shader_location: 2,
+                },
+            ],
+        };
 
-        let mut vertex_state = web_sys::GpuVertexState::new(
-            logical_shader_module.get_vertex_stage_entry().unwrap(),
-            shader_module,
-        );
+        let mut vertex_state = wgpu::VertexState {
+            module: &shader_module,
+            entry_point: logical_shader_module.get_vertex_stage_entry().unwrap(),
+            buffers: &[vertex_buffer_layout], // TODO: SOA
+        };
 
-        vertex_state.buffers(&jsarray([&vertex_buffer_layout].as_slice()));
-
-        let pass = encoder.current_pass.as_ref().unwrap();
-
-        let color_attachments: Vec<JsValue> = pass
+        let color_attachments: Vec<_> = pass_encoder
+            .pass
             .get_color_attachments()
             .into_iter()
             .map(|view| {
-                let texref = view.texture_view.get_texture();
-                let tex = texref.borrow();
-                JsValue::from(web_sys::GpuColorTargetState::new(tex.get_format().into()))
+                let attachment = wgpu::ColorTargetState {
+                    format: view.texture_view.get_format(pass_encoder.encoder).into(),
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::all(),
+                };
+                Some(attachment)
             })
             .collect();
 
-        let fragment_state = web_sys::GpuFragmentState::new(
-            logical_shader_module.get_fragment_stage_entry().unwrap(),
-            &shader_module,
-            &jsarray(&color_attachments),
+        let fragment_state = wgpu::FragmentState {
+            module: &shader_module,
+            entry_point: logical_shader_module.get_fragment_stage_entry().unwrap(),
+            targets: &color_attachments,
+        };
+
+        let depth_stencil_state = pass_encoder
+            .pass
+            .get_depth_stencil_attachment()
+            .iter()
+            .map(|view| {
+                let texref = view.texture_view.get_texture();
+                let tex = texref.borrow();
+
+                wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth24PlusStencil8,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .pop();
+
+        let pipeline_layout = pass_encoder.encoder.get_device().create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &pass_encoder
+                    .encoder
+                    .get_bind_group_layouts()
+                    .iter()
+                    .collect::<Vec<&wgpu::BindGroupLayout>>(),
+                push_constant_ranges: &[],
+            },
         );
 
-        let pipeline_layout = encoder.get_device().create_pipeline_layout(
-            &web_sys::GpuPipelineLayoutDescriptor::new(&jsarray(encoder.get_bind_group_layouts())),
-        );
+        let primitive_state = wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        };
 
-        let mut descriptor =
-            web_sys::GpuRenderPipelineDescriptor::new(&pipeline_layout, &vertex_state);
-        descriptor.fragment(&fragment_state);
+        let descriptor = wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&pipeline_layout),
+            vertex: vertex_state,
+            primitive: primitive_state,
+            depth_stencil: depth_stencil_state,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(fragment_state),
+            multiview: None,
+        };
 
-        if let Some(view) = pass.get_depth_stencil_attachment() {
-            let texref = view.get_texture();
-            let tex = texref.borrow();
-            descriptor.depth_stencil(
-                GpuDepthStencilState::new(tex.get_format().into())
-                    .depth_compare(GpuCompareFunction::LessEqual)
-                    .depth_write_enabled(true),
-            );
-        }
-
-        encoder.get_device().create_render_pipeline(&descriptor)
+        pass_encoder
+            .encoder
+            .get_device()
+            .create_render_pipeline(&descriptor)
     }
 }
 
@@ -95,100 +146,146 @@ enum EUniformBufferType {
     Global,
 }
 
-pub struct FWebGPUEncoder {
-    device: GpuDevice,
-    context: GpuCanvasContext,
-    swapchain_texture: RcMut<FTexture>,
+pub struct FDeviceEncoder {
+    hoo_engine: HooEngineWeak,
 
-    encoder: Option<GpuCommandEncoder>,
-    pass_encoder: Option<GpuRenderPassEncoder>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
 
-    bind_group_layouts: Vec<GpuBindGroupLayout>,
+    surface: wgpu::Surface,
+    swapchain_texture: RefCell<Option<wgpu::SurfaceTexture>>,
+    swapchain_size: (u32, u32),
+    swapchain_format: EValueFormat,
+
+    bind_group_layouts: Vec<wgpu::BindGroupLayout>,
 
     uniform_buffer_view_global: Option<FBufferView>,
     uniform_buffer_view_task: Option<FBufferView>,
-
-    // bind_group_global: Option<GpuBindGroup>,
-    // bind_group_task: Option<GpuBindGroup>,
-    // bind_group_pass: Option<GpuBindGroup>,
-    current_pass: Option<FPass>,
 }
 
-impl FWebGPUEncoder {
+pub struct FPassEncoder<'a: 'c, 'b: 'c, 'c, 'd: 'c, 'e> {
+    // access using a function
+    encoder: &'a FDeviceEncoder,
+
+    // keep them private
+    pass: &'b FPass,
+    render_pass: wgpu::RenderPass<'c>,
+    resources: &'d Vec<Ref<'e, dyn TGPUResource>>,
+
+    render_pipeline_cache: &'d typed_arena::Arena<wgpu::RenderPipeline>,
+    bind_group_cache: &'d typed_arena::Arena<wgpu::BindGroup>,
+}
+
+pub struct FFrameEncoder<'a, 'b, 'c> {
+    // access using a function
+    encoder: &'a mut FDeviceEncoder,
+    // private
+    command_encoder: wgpu::CommandEncoder,
+    resources: &'b Vec<Ref<'c, dyn TGPUResource>>,
+}
+
+impl FDeviceEncoder {
     // getter
-    pub fn get_device(&self) -> &GpuDevice {
+    pub fn get_device(&self) -> &wgpu::Device {
         &self.device
     }
 
-    pub fn get_context(&self) -> &GpuCanvasContext {
-        &self.context
+    pub fn get_queue(&self) -> &wgpu::Queue {
+        &self.queue
     }
 
-    pub fn get_encoder(&self) -> &Option<GpuCommandEncoder> {
-        &self.encoder
+    pub fn get_swapchain_texture(&self) -> Ref<Option<wgpu::SurfaceTexture>> {
+        {
+            let mut swapchain_texture = self.swapchain_texture.borrow_mut();
+            if swapchain_texture.is_none() {
+                *swapchain_texture = Some(self.surface.get_current_texture().unwrap());
+            }
+        }
+        return self.swapchain_texture.borrow();
     }
 
-    pub fn get_bind_group_layouts(&self) -> &Vec<GpuBindGroupLayout> {
+    pub fn get_swapchain_format(&self) -> EValueFormat {
+        self.swapchain_format
+    }
+
+    fn get_bind_group_layouts(&self) -> &Vec<wgpu::BindGroupLayout> {
         &self.bind_group_layouts
     }
 
     // impl
 
-    pub fn new(h: HooEngineRef, context: GpuCanvasContext) -> Self {
-        futures::executor::block_on(Self::new_async(h, context))
+    pub fn new(h: HooEngineRef, window: &winit::window::Window) -> Self {
+        futures::executor::block_on(Self::new_async(h, window))
     }
 
-    pub async fn new_async<'a>(h: HooEngineRef<'a>, context: GpuCanvasContext) -> Self {
-        let navigator = window().unwrap().navigator();
-        let gpu = navigator.gpu();
-        let adapter = JsFuture::from(gpu.request_adapter())
-            .await
-            .unwrap()
-            .dyn_into::<GpuAdapter>()
-            .unwrap();
-        let device = JsFuture::from(adapter.request_device())
-            .await
-            .unwrap()
-            .dyn_into::<GpuDevice>()
-            .unwrap();
-        let swapchain_format = GpuTextureFormat::Bgra8unorm;
+    pub async fn new_async<'a>(h: HooEngineRef<'a>, window: &winit::window::Window) -> Self {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::DX12,
+            dx12_shader_compiler: Default::default(),
+        });
 
-        context.configure(&GpuCanvasConfiguration::new(&device, swapchain_format));
-        let swapchain_texture = FTexture::new_swapchain_texture_and_manage(h, &context);
+        let surface = unsafe { instance.create_surface(&window) }.unwrap();
+
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .unwrap();
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::empty(),
+                    limits: wgpu::Limits::default(),
+                    label: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let size = window.inner_size();
+        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: size.width,
+            height: size.height,
+            present_mode: surface_caps.present_modes[0],
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+        };
+        surface.configure(&device, &config);
+        let surface_texture = surface.get_current_texture().unwrap();
 
         let bind_group_layouts = Self::make_bind_group_layouts(&device);
 
         Self {
+            hoo_engine: h.clone(),
             device: device,
-            context: context,
-            swapchain_texture,
-
-            encoder: None,
-            pass_encoder: None,
-
+            queue: queue,
+            surface: surface,
+            swapchain_size: (size.width, size.height),
+            swapchain_texture: RefCell::new(Some(surface_texture)),
+            swapchain_format: EValueFormat::from(surface_format),
             bind_group_layouts: bind_group_layouts,
-
             uniform_buffer_view_global: None,
             uniform_buffer_view_task: None,
-
-            // bind_group_global: None,
-            // bind_group_task: None,
-            // bind_group_pass: None,
-            current_pass: None,
         }
     }
 
-    pub fn get_swapchain_texture(&self) -> RcMut<FTexture> {
-        return self.swapchain_texture.clone();
-    }
 
     pub fn get_swapchain_size(&self) -> (u32, u32) {
-        let context = &self.context;
-        let swapchain_size = (
-            context.get_current_texture().width(),
-            context.get_current_texture().height(),
-        );
-        swapchain_size
+        self.swapchain_size
     }
 
     // 所有 pipeline 的 bind group layout 都是一致的, 若干个 cbuffer + 若干个贴图
@@ -199,252 +296,258 @@ impl FWebGPUEncoder {
     // PassUniform: 在 Pass 中提供，大小可变
     // TaskUniform: 暂时没想好如何做抽象，先通过 SetTaskUniform 设置。类似于 Viewport 的概念，表示一个完整的渲染管线。
     // GlobalUniform: 通过 SetGlobalUniformBuffer 设置，大小固定
-    fn make_bind_group_layouts(device: &GpuDevice) -> Vec<GpuBindGroupLayout> {
+    fn make_bind_group_layouts(device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
         let mut bind_group_layout_entries = vec![];
         for i in 0..EUniformBufferType::COUNT {
-            let mut entry = GpuBindGroupLayoutEntry::new(
-                i as u32,
-                gpu_shader_stage::VERTEX | gpu_shader_stage::FRAGMENT | gpu_shader_stage::COMPUTE,
-            );
-            entry.buffer(&GpuBufferBindingLayout::new().type_(GpuBufferBindingType::Uniform));
+            let mut entry = wgpu::BindGroupLayoutEntry {
+                binding: i as u32,
+                visibility: wgpu::ShaderStages::VERTEX
+                    | wgpu::ShaderStages::FRAGMENT
+                    | wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            };
             bind_group_layout_entries.push(entry);
         }
-        let out = device.create_bind_group_layout(
-            &GpuBindGroupLayoutDescriptor::new(&jsarray(&bind_group_layout_entries))
-                .label("BindGroup-0"),
-        );
+
+        let desc = wgpu::BindGroupLayoutDescriptor {
+            label: Some("BindGroup-0"),
+            entries: &bind_group_layout_entries,
+        };
+
+        let out = device.create_bind_group_layout(&desc);
+
         return vec![out];
-
-        // let mut bind_group_layout_entry_uniform_template = GpuBindGroupLayoutEntry::new(
-        //     0,
-        //     gpu_shader_stage::VERTEX | gpu_shader_stage::FRAGMENT | gpu_shader_stage::COMPUTE,
-        // );
-        // bind_group_layout_entry_uniform_template
-        //     .buffer(&GpuBufferBindingLayout::new().type_(GpuBufferBindingType::Uniform));
-
-        // let mut out = Vec::new();
-
-        // // Global, Task, Pass, DrawCall, Material
-        // for _ in EUniformBufferType::VARIANTS {
-        //     let mut bind_group_layout_entry_array = Vec::new();
-
-        //     // uniform buffer
-        //     let bind_group_layout_entry_uniform = bind_group_layout_entry_uniform_template.clone();
-        //     bind_group_layout_entry_array.push(bind_group_layout_entry_uniform);
-
-        //     // textures, etc.
-
-        //     let bind_group_layout =
-        //         device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&jsarray(
-        //             bind_group_layout_entry_array.as_slice(),
-        //         )));
-        //     out.push(bind_group_layout);
-        // }
-
-        // out
-    }
-
-    fn create_bind_group_entry_of_buffer(
-        &self,
-        binding: u32,
-        buffer: &FBufferView,
-    ) -> GpuBindGroupEntry {
-        GpuBindGroupEntry::new(
-            binding,
-            &web_sys::GpuBufferBinding::new(buffer.get_buffer().borrow().get_device_buffer())
-                .offset(buffer.get_offset() as f64)
-                .size(buffer.get_size() as f64),
-        )
     }
 
     pub fn set_global_uniform_buffer_view(&mut self, buffer: FBufferView) {
         self.uniform_buffer_view_global = Some(buffer);
-        // self.update_bind_group_global();
     }
 
     pub fn set_task_uniform_buffer_view(&mut self, buffer: FBufferView) {
         self.uniform_buffer_view_task = Some(buffer);
-        // self.update_bind_group_task();
     }
 
-    // fn update_bind_group_global(&mut self) {
-    //     let buffer = self.uniform_buffer_view_global.as_ref().unwrap();
+    pub fn encode_frame<F: FnOnce(&mut FFrameEncoder)>(&mut self, frame_closure: F) {
+        let command_encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Main Command Encoder"),
+            });
 
-    //     let bind_group_entries = [self.create_bind_group_entry_of_buffer(0, buffer)];
+        let res = self
+            .hoo_engine
+            .upgrade()
+            .unwrap()
+            .borrow()
+            .get_resources()
+            .prepare_gpu_resources(self);
 
-    //     let bind_group = self
-    //         .device
-    //         .create_bind_group(&web_sys::GpuBindGroupDescriptor::new(
-    //             &jsarray(bind_group_entries.as_slice()),
-    //             &self.bind_group_layouts[0],
-    //         ));
+        let res_ref = res.iter().map(|x| x.borrow()).collect::<Vec<_>>();
 
-    //     self.bind_group_global = Some(bind_group);
-    // }
+        let command_encoder = {
+            let mut frame_encoder = FFrameEncoder {
+                encoder: self,
+                command_encoder: command_encoder,
+                resources: &res_ref,
+            };
 
-    // fn update_bind_group_task(&mut self) {
-    //     let buffer = self.uniform_buffer_view_task.as_ref().unwrap();
+            frame_closure(&mut frame_encoder);
 
-    //     let bind_group_entries = [self.create_bind_group_entry_of_buffer(0, buffer)];
+            frame_encoder.command_encoder
+        };
 
-    //     let bind_group = self
-    //         .device
-    //         .create_bind_group(&web_sys::GpuBindGroupDescriptor::new(
-    //             &jsarray(bind_group_entries.as_slice()),
-    //             &self.bind_group_layouts[1],
-    //         ));
-
-    //     self.bind_group_task = Some(bind_group);
-    // }
-
-    pub fn begin_frame(&mut self) {
-        debug_assert!(self.encoder.is_none());
-        self.encoder = Some(self.device.create_command_encoder());
-        self.swapchain_texture
-            .borrow_mut()
-            .update_swapchain_texture(&self.context);
+        self.queue.submit(std::iter::once(command_encoder.finish()));
     }
 
-    pub fn end_frame(&mut self) {
-        self.swapchain_texture
-            .borrow_mut()
-            .clear_swapchain_texture();
-
-        let encoder = self.encoder.take().unwrap();
-        self.device
-            .queue()
-            .submit(&jsarray(&[encoder.finish()].as_slice()));
+    pub fn present(&mut self) {
+        let _  = self.get_swapchain_texture();
+        self.swapchain_texture.take().unwrap().present();
     }
+}
 
-    // fn create_pass_bind_group(&mut self, pass: &FPass) {
-    //     debug_assert!(self.bind_group_pass.is_none());
-
-    //     let bind_group = self.device.create_bind_group(&GpuBindGroupDescriptor::new(
-    //         &jsarray(
-    //             [self.create_bind_group_entry_of_buffer(0, pass.get_uniform_buffer_view())]
-    //                 .as_slice(),
-    //         ),
-    //         &self.bind_group_layouts[2],
-    //     ));
-    //     self.bind_group_pass = Some(bind_group);
-    // }
-
-    pub fn begin_render_pass(&mut self, render_pass: &FPass) {
-        debug_assert!(self.pass_encoder.is_none());
-        debug_assert!(self.current_pass.is_none());
-
-        // self.create_pass_bind_group(render_pass);
-        self.current_pass = Some(render_pass.clone());
-
-        let encoder = self.encoder.as_ref().unwrap();
+impl FFrameEncoder<'_, '_, '_> {
+    pub fn encode_render_pass<F: FnOnce(&mut FPassEncoder)>(
+        &mut self,
+        render_pass: &FPass,
+        pass_closure: F,
+    ) {
+        let color_attachments_views: Vec<_> = render_pass
+            .get_color_attachments()
+            .into_iter()
+            .map(|x| x.texture_view.get_device_texture_view(&self.encoder))
+            .collect();
 
         let color_attachments: Vec<_> = render_pass
             .get_color_attachments()
-            .into_iter()
-            .map(|x| {
-                let color_attachment = GpuRenderPassColorAttachment::new(
-                    x.load_op.clone().into(),
-                    x.store_op.clone().into(),
-                    &x.texture_view.get_device_texture_view(),
-                );
-                JsValue::from(color_attachment)
+            .iter()
+            .zip(color_attachments_views.iter())
+            .map(|(x, y)| {
+                let z = wgpu::RenderPassColorAttachment {
+                    view: &y,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: x.load_op.to_wgpu_color(&x.clear_value),
+                        store: x.store_op.store(),
+                    },
+                };
+                Some(z)
             })
             .collect();
 
-        let mut render_pass_descriptor = GpuRenderPassDescriptor::new(&jsarray(&color_attachments));
+        let depth_attachment_view = render_pass
+            .get_depth_stencil_attachment()
+            .as_ref()
+            .map(|x| x.texture_view.get_device_texture_view(&self.encoder));
 
-        if let Some(dsv) = render_pass.get_depth_stencil_attachment() {
-            let mut desc = GpuRenderPassDepthStencilAttachment::new(&dsv.get_device_texture_view());
+        let depth_attachment = render_pass
+            .get_depth_stencil_attachment()
+            .iter()
+            .zip(depth_attachment_view.iter())
+            .map(|(dsv, view)| wgpu::RenderPassDepthStencilAttachment {
+                view: &view,
+                depth_ops: Some(wgpu::Operations {
+                    load: dsv.load_op.to_wgpu_value(dsv.clear_value.clone()),
+                    store: dsv.store_op.store(),
+                }),
+                stencil_ops: None,
+            })
+            .collect::<Vec<wgpu::RenderPassDepthStencilAttachment>>()
+            .pop();
 
-            desc.depth_load_op(GpuLoadOp::Clear);
-            desc.depth_store_op(GpuStoreOp::Store);
-            desc.depth_clear_value(1.0);
+        let render_pass_descriptor = wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &color_attachments,
+            depth_stencil_attachment: depth_attachment,
+        };
 
-            desc.stencil_load_op(GpuLoadOp::Clear);
-            desc.stencil_store_op(GpuStoreOp::Store);
-            desc.stencil_clear_value(0);
-            desc.stencil_read_only(false);
+        let pass = self
+            .command_encoder
+            .begin_render_pass(&render_pass_descriptor);
 
-            render_pass_descriptor.depth_stencil_attachment(&desc);
-        }
+        let render_pipeline_cache = typed_arena::Arena::new();
+        let bindgroup_cache = typed_arena::Arena::new();
 
-        let depth_stencil_attachment: Option<GpuRenderPassDepthStencilAttachment> = None;
-        if let Some(depth_stencil_attachment) = depth_stencil_attachment {
-            render_pass_descriptor.depth_stencil_attachment(&depth_stencil_attachment);
-        }
+        let mut pass_encoder = FPassEncoder {
+            pass: render_pass,
+            resources: self.resources,
+            encoder: &self.encoder,
+            render_pass: pass,
 
-        let pass = encoder.begin_render_pass(&render_pass_descriptor);
-        self.pass_encoder = Some(pass);
+            render_pipeline_cache: &render_pipeline_cache,
+            bind_group_cache: &bindgroup_cache,
+        };
+
+        pass_closure(&mut pass_encoder);
     }
 
-    pub fn end_render_pass(&mut self) {
-        self.pass_encoder.take().unwrap().end();
-        self.current_pass.take().unwrap();
-        // self.bind_group_pass.take().unwrap();
+    pub fn get_device_encoder(&mut self) -> &mut FDeviceEncoder {
+        self.encoder
     }
+}
 
+impl<'c> FPassEncoder<'_, '_, 'c, '_, '_> {
     pub fn setup_pipeline(&mut self, shader_module: &RcMut<FShaderModule>) {
         let mut pipeline = FPipeline::new();
         let device_pipeline = pipeline.create_device_resource_with_pass(self, shader_module);
-        let pass_encoder = self.pass_encoder.as_ref().unwrap();
-        pass_encoder.set_pipeline(&device_pipeline);
+        let pipeline_ref = self.render_pipeline_cache.alloc(device_pipeline);
+        self.render_pass.set_pipeline(pipeline_ref);
     }
 
-    pub fn draw(&mut self, draw_command: &crate::renderer::resource::FDrawCommand) {
-        let pass_encoder = self.pass_encoder.as_ref().unwrap();
-        // let current_pass = &self.current_pass;
+    pub fn create_bind_group_entry_of_buffer(
+        &self,
+        binding: u32,
+        view: &FBufferView,
+    ) -> wgpu::BindGroupEntry {
+        let buffer_id = view.get_buffer().borrow().get_consolidation_id();
+        let buffer_ref = self.resources[buffer_id as usize].as_buffer().unwrap();
 
+        let entry = wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: buffer_ref.get_device_buffer(),
+                offset: view.get_offset() as wgpu::BufferAddress,
+                size: None,
+            }),
+        };
+
+        entry
+    }
+
+    pub fn draw(&mut self, draw_command: &FDrawCommand) {
         let vertex_buffer_view = draw_command.get_vertex_buffer_view();
         let index_buffer_view = draw_command.get_index_buffer_view();
 
-        pass_encoder.set_vertex_buffer_with_u32_and_u32(
+        let vertex_buffer = vertex_buffer_view.get_buffer();
+        let vertex_buffer_ref = self.resources
+            [vertex_buffer.borrow().get_consolidation_id() as usize]
+            .as_buffer()
+            .unwrap();
+        let vertex_buffer_offset = vertex_buffer_view.get_offset();
+        let vertex_buffer_size = vertex_buffer_view.size();
+        self.render_pass.set_vertex_buffer(
             0,
-            vertex_buffer_view.get_buffer().borrow().get_device_buffer(),
-            vertex_buffer_view.get_offset(),
-            vertex_buffer_view.get_size(),
+            vertex_buffer_ref
+                .get_device_buffer()
+                .slice(vertex_buffer_offset..(vertex_buffer_offset + vertex_buffer_size)),
         );
 
-        pass_encoder.set_index_buffer_with_u32_and_u32(
-            index_buffer_view.get_buffer().borrow().get_device_buffer(),
-            GpuIndexFormat::Uint32,
-            index_buffer_view.get_offset(),
-            index_buffer_view.get_size(),
+        let index_buffer = index_buffer_view.get_buffer();
+        let index_buffer_ref = self.resources
+            [index_buffer.borrow().get_consolidation_id() as usize]
+            .as_buffer()
+            .unwrap();
+        let index_buffer_offset = index_buffer_view.get_offset();
+        let index_buffer_size = index_buffer_view.size();
+
+        self.render_pass.set_index_buffer(
+            index_buffer_ref
+                .get_device_buffer()
+                .slice(index_buffer_offset..(index_buffer_offset + index_buffer_size)),
+            wgpu::IndexFormat::Uint32,
         );
 
-        let bindgroup_0 = self.device.create_bind_group(&GpuBindGroupDescriptor::new(
-            &jsarray(
-                [
-                    self.create_bind_group_entry_of_buffer(
-                        EUniformBufferType::Material as u32,
-                        draw_command.get_material_view(),
-                    ),
-                    self.create_bind_group_entry_of_buffer(
-                        EUniformBufferType::DrawCall as u32,
-                        draw_command.get_drawcall_view(),
-                    ),
-                    self.create_bind_group_entry_of_buffer(
-                        EUniformBufferType::Pass as u32,
-                        self.current_pass
-                            .as_ref()
-                            .unwrap()
-                            .get_uniform_buffer_view(),
-                    ),
-                    self.create_bind_group_entry_of_buffer(
-                        EUniformBufferType::Task as u32,
-                        self.uniform_buffer_view_task.as_ref().unwrap(),
-                    ),
-                    self.create_bind_group_entry_of_buffer(
-                        EUniformBufferType::Global as u32,
-                        self.uniform_buffer_view_global.as_ref().unwrap(),
-                    ),
-                ]
-                .as_slice(),
+        let bind_group_entries = [
+            self.create_bind_group_entry_of_buffer(
+                EUniformBufferType::Material as u32,
+                draw_command.get_material_view(),
             ),
-            &self.bind_group_layouts[0],
-        ));
+            self.create_bind_group_entry_of_buffer(
+                EUniformBufferType::DrawCall as u32,
+                draw_command.get_drawcall_view(),
+            ),
+            self.create_bind_group_entry_of_buffer(
+                EUniformBufferType::Pass as u32,
+                self.pass.get_uniform_buffer_view(),
+            ),
+            self.create_bind_group_entry_of_buffer(
+                EUniformBufferType::Task as u32,
+                self.encoder.uniform_buffer_view_task.as_ref().unwrap(),
+            ),
+            self.create_bind_group_entry_of_buffer(
+                EUniformBufferType::Global as u32,
+                self.encoder.uniform_buffer_view_global.as_ref().unwrap(),
+            ),
+        ];
 
-        pass_encoder.set_bind_group(0, &bindgroup_0);
+        let bindgroup_0 = self
+            .encoder
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.encoder.bind_group_layouts[0],
+                entries: &bind_group_entries,
+            });
 
-        pass_encoder.draw_indexed(draw_command.get_index_count());
+        let bindgroup_0_ref = self.bind_group_cache.alloc(bindgroup_0);
+
+        self.render_pass.set_bind_group(0, bindgroup_0_ref, &[]);
+
+        self.render_pass
+            .draw_indexed(0..draw_command.get_index_count() as u32, 0, 0..1);
     }
 }

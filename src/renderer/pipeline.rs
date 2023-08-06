@@ -11,7 +11,7 @@ use nalgebra_glm as glm;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    struct Flags: u32 {
+    struct Flags: u64 {
         const A = 0b00000001;
         const B = 0b00000010;
         const C = 0b00000100;
@@ -32,18 +32,132 @@ pub struct FGraphicsPipeline {
     render_object1: FRenderObject,
     render_object2: FRenderObject,
 
-    count: u32,
+    count: u64,
 }
 
-// 实现基本功能：
-// 多 pass 支持
-// 不同 pass 收集不同的 flags
+enum FGPUResourceWrapper {
+    Buffer(wgpu::Buffer),
+    Texture(wgpu::Texture),
+    ShaderModule(wgpu::ShaderModule),
+}
+
+impl FGPUResourceWrapper {
+    fn buffer(&self) -> &wgpu::Buffer {
+        match self {
+            FGPUResourceWrapper::Buffer(b) => b,
+            _ => panic!(""),
+        }
+    }
+
+    fn texture(&self) -> &wgpu::Texture {
+        match self {
+            FGPUResourceWrapper::Texture(t) => t,
+            _ => panic!(""),
+        }
+    }
+
+    fn shader_module(&self) -> &wgpu::ShaderModule {
+        match self {
+            FGPUResourceWrapper::ShaderModule(s) => s,
+            _ => panic!(""),
+        }
+    }
+}
+
+struct FGPUResourceHandle {}
 
 impl FGraphicsPipeline {
-    pub async fn new_async<'a>(h: HooEngineRef<'a>, encoder: &FWebGPUEncoder) -> Self {
+    pub async fn new_async<'a>(h: HooEngineRef<'a>, encoder: &FDeviceEncoder) -> Self {
         // material
-        let shader_code = get_text_from_url("/resources/main.wgsl").await.unwrap();
-        let material = rcmut!(FMaterial::new(h, shader_code));
+        // let shader_code = "".to_string(); // get_text_from_url("/resources/main.wgsl").await.unwrap();
+        let shader_code = r#"
+// #define UNIFORM_BIND_GROUP_Material 0
+// #define UNIFORM_BIND_GROUP_DrawCall 1
+// #define UNIFORM_BIND_GROUP_Pass 2
+// #define UNIFORM_BIND_GROUP_Task 3
+// #define UNIFORM_BIND_GROUP_Global 4
+// 有无 const 语法？
+
+const xx = 0;
+
+struct VertexOut {
+    @builtin(position) position : vec4f,
+
+    @location(0) uv0 : vec2f,
+    @location(1) normal_local : vec3f
+};
+
+struct FragmentOut {
+    @location(0) color : vec4f,
+    // @builtin(frag_depth) depth: f32,
+};
+
+struct DrawCallUniform {
+    transform_m: mat4x4f,
+    transform_mv: mat4x4f,
+    transform_mvp: mat4x4f,
+
+    // color1: f32,
+    // color2: f32,
+};
+
+@group(0) @binding(1) var<uniform> cDrawCall: DrawCallUniform;
+
+
+@vertex
+fn vsMain_base(
+    @location(0) pos: vec3f, 
+    @location(1) normal: vec3f, 
+    @location(2) uv: vec2f
+) -> VertexOut {
+    // cDrawCall.matrix_projection * 
+    var vertex_out: VertexOut;
+    vertex_out.position = cDrawCall.transform_mvp * vec4f(pos.xyz, 1.0);
+    vertex_out.uv0 = uv;
+    vertex_out.normal_local = normal;
+    
+    return vertex_out;
+}
+
+@fragment
+fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
+    // w: linear depth
+    // w/z: 0~1, 0 means near
+
+    var fragment_out: FragmentOut;
+    fragment_out.color = vec4f(abs(vertex_out.normal_local.xyz) + 0.3, 1.0);
+    // fragment_out.depth = vertex_out.position.w / vertex_out.position.z;
+    return fragment_out;
+}
+
+
+@vertex
+fn vsMain_depthOnly(
+    @location(0) pos: vec3f, 
+    @location(1) normal: vec3f, 
+    @location(2) uv: vec2f
+) -> VertexOut {
+    // cDrawCall.matrix_projection * 
+    var vertex_out: VertexOut;
+    vertex_out.position = cDrawCall.transform_mvp * vec4f(pos.xyz, 1.0);
+    vertex_out.uv0 = uv;
+    vertex_out.normal_local = normal;
+    
+    return vertex_out;
+}
+
+@fragment
+fn fsMain_depthOnly(vertex_out: VertexOut) -> FragmentOut {
+    // w: linear depth
+    // w/z: 0~1, 0 means near
+
+    var fragment_out: FragmentOut;
+    fragment_out.color = vec4f(abs(vertex_out.normal_local.xyz) + 0.3, 1.0);
+    // fragment_out.depth = vertex_out.position.w / vertex_out.position.z;
+    return fragment_out;
+}
+        "#;
+        let material = rcmut!(FMaterial::new(h, shader_code.into()));
         material.borrow_mut().enable_pass_variant("base".into());
         material
             .borrow_mut()
@@ -67,18 +181,27 @@ impl FGraphicsPipeline {
         let uniform_view = FBufferView::new_uniform(default_uniform_buffer.clone());
 
         // pass
-        let swapchain_image = encoder.get_swapchain_texture();
         let depth_texture =
             FTexture::new_and_manage(h, EValueFormat::Depth24Stencil8, BTextureUsages::Attachment);
         depth_texture
             .borrow_mut()
-            .set_size(swapchain_image.borrow_mut().get_size());
+            .set_size(encoder.get_swapchain_size());
         let depth_texture_view = FTextureView::new(depth_texture.clone());
 
         let mut pass1 = FPass::new(uniform_view.clone());
         let mut pass2 = FPass::new(uniform_view.clone());
-        pass1.set_depth_stencil_attachment(depth_texture_view.clone());
-        pass2.set_depth_stencil_attachment(depth_texture_view.clone());
+        pass1.set_depth_stencil_attachment(FAttachment {
+            texture_view: depth_texture_view.clone(),
+            load_op: ELoadOp::Clear,
+            store_op: EStoreOp::Discard,
+            clear_value: FClearValue::Float(1f32),
+        });
+        pass2.set_depth_stencil_attachment(FAttachment {
+            texture_view: depth_texture_view.clone(),
+            load_op: ELoadOp::Clear,
+            store_op: EStoreOp::Discard,
+            clear_value: FClearValue::Float(1f32),
+        });
 
         Self {
             hoo_engine: h.clone(),
@@ -93,10 +216,11 @@ impl FGraphicsPipeline {
         }
     }
 
-    pub fn draw(&mut self, encoder: &mut FWebGPUEncoder) {
+    pub fn draw(&mut self, encoder: &mut FDeviceEncoder) {
         // before draw
 
         self.count += 1;
+
         let mat_model: glm::Mat4x4 =
             glm::rotation(self.count as f32 * 0.01, &glm::vec3(0.0, 1.0, 0.0));
 
@@ -126,36 +250,8 @@ impl FGraphicsPipeline {
         //     .update_by_array(&uniform_buffer_data);
         // self.uniform_buffer.borrow_mut().resize(1024);
 
-        // draw
-
-        self.hoo_engine
-            .upgrade()
-            .unwrap()
-            .borrow()
-            .get_resources()
-            .prepare_gpu_resources(encoder);
-
         // TODO: should be updated somewhere else
         encoder.set_global_uniform_buffer_view(self.uniform_view.clone());
-
-        encoder.begin_frame();
-
-        let swapchain_image = encoder.get_swapchain_texture();
-        let swapchain_image_view = FTextureView::new(swapchain_image.clone());
-
-        self.pass1.set_color_attachments(vec![FColorAttachment::new(
-            swapchain_image_view.clone(),
-            ELoadOp::Clear,
-            EStoreOp::Store,
-        )]);
-
-        self.pass2.set_color_attachments(vec![FColorAttachment::new(
-            swapchain_image_view.clone(),
-            ELoadOp::Load,
-            EStoreOp::Store,
-        )]);
-
-        encoder.set_task_uniform_buffer_view(self.uniform_view.clone());
 
         self.render_object1
             .set_transform_model(mat_model.clone())
@@ -169,14 +265,43 @@ impl FGraphicsPipeline {
             .set_transform_projection(mat_proj.clone())
             .update_uniform_buffer();
 
-        encoder.begin_render_pass(&self.pass1);
-        self.render_object1.encode(encoder, "base");
-        encoder.end_render_pass();
+        encoder.encode_frame(|frame_encoder| {
+            let swapchain_image_view = FTextureView::new_swapchain_view();
 
-        encoder.begin_render_pass(&self.pass2);
-        self.render_object2.encode(encoder, "base");
-        encoder.end_render_pass();
+            self.pass1.set_color_attachments(vec![FAttachment::new(
+                swapchain_image_view.clone(),
+                ELoadOp::Clear,
+                EStoreOp::Store,
+            )
+            .set_clear_value(FClearValue::Float4 {
+                r: 0.1,
+                g: 0.0,
+                b: 0.1,
+                a: 1.0,
+            })
+            .clone()]);
 
-        encoder.end_frame();
+            self.pass2.set_color_attachments(vec![FAttachment::new(
+                swapchain_image_view.clone(),
+                ELoadOp::Load,
+                EStoreOp::Store,
+            )]);
+
+            frame_encoder
+                .get_device_encoder()
+                .set_task_uniform_buffer_view(self.uniform_view.clone());
+
+            frame_encoder.encode_render_pass(&self.pass1, |pass_encoder| {
+                self.render_object1.encode(pass_encoder, "base");
+            });
+
+            // encoder.begin_render_pass(&self.pass2);
+            // self.render_object2.encode(encoder, "base");
+            // encoder.end_render_pass();
+
+            // frame_encoder.present();
+        });
+
+        encoder.present();
     }
 }

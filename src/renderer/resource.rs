@@ -1,67 +1,97 @@
 use bitflags::bitflags;
 use std::{collections::HashMap, default};
-use web_sys::{GpuCanvasContext, GpuLoadOp, GpuStoreOp, GpuTextureDescriptor, GpuTextureFormat};
+use wgpu;
 
 use crate::{
-    check, debug_only, hoo_log,
-    io::resource::RSubMesh,
-    rcmut,
-    renderer::utils::{jsarray, slice_to_bin_string},
-    utils::types::RcMut,
-    HooEngineRef, HooEngineWeak,
+    check, debug_only, hoo_log, io::resource::RSubMesh, rcmut,
+    renderer::utils::slice_to_bin_string, utils::types::RcMut, HooEngineRef, HooEngineWeak,
 };
 
-use super::{encoder::FWebGPUEncoder, utils::struct_to_bin_string};
+use super::{
+    encoder::{FDeviceEncoder, FPassEncoder},
+    utils::struct_to_bin_string,
+};
 
 use nalgebra_glm as glm;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub struct BBufferUsages: u32 {
+    pub struct BBufferUsages: u64 {
         const Vertex = 0x1;
         const Index = 0x2;
         const Uniform = 0x4;
     }
 }
 
-fn get_webgpu_buffer_usages(usages: BBufferUsages) -> u32 {
-    let mut ret = 0;
+impl Into<wgpu::BufferUsages> for BBufferUsages {
+    fn into(self) -> wgpu::BufferUsages {
+        let mut ret = wgpu::BufferUsages::empty();
 
-    if usages.contains(BBufferUsages::Vertex) {
-        ret |= web_sys::gpu_buffer_usage::VERTEX;
-    }
-    if usages.contains(BBufferUsages::Index) {
-        ret |= web_sys::gpu_buffer_usage::INDEX;
-    }
-    if usages.contains(BBufferUsages::Uniform) {
-        ret |= web_sys::gpu_buffer_usage::UNIFORM;
-    }
+        if self.contains(BBufferUsages::Vertex) {
+            ret |= wgpu::BufferUsages::VERTEX;
+        }
+        if self.contains(BBufferUsages::Index) {
+            ret |= wgpu::BufferUsages::INDEX;
+        }
+        if self.contains(BBufferUsages::Uniform) {
+            ret |= wgpu::BufferUsages::UNIFORM;
+        }
 
-    ret
+        ret
+    }
 }
 
 pub trait TGPUResource {
-    fn create_device_resource(&mut self, encoder: &mut FWebGPUEncoder);
-    fn update_device_resource(&mut self, _: &mut FWebGPUEncoder) {}
+    fn create_device_resource(&mut self, encoder: &mut FDeviceEncoder);
+    fn update_device_resource(&mut self, _: &mut FDeviceEncoder) {}
     fn ready(&self) -> bool; // 有数据，但可能需要更新
     fn need_update(&self) -> bool {
         return false;
     } // 需要更新
+
+    fn assign_consolidation_id(&mut self, _: u64);
+    fn get_consolidation_id(&self) -> u64;
+
+    fn as_buffer(&self) -> Option<&FBuffer> {
+        None
+    }
+
+    fn as_buffer_mut(&mut self) -> Option<&mut FBuffer> {
+        None
+    }
+
+    fn as_texture(&self) -> Option<&FTexture> {
+        None
+    }
+
+    fn as_texture_mut(&mut self) -> Option<&mut FTexture> {
+        None
+    }
+
+    fn as_shader_module(&self) -> Option<&FShaderModule> {
+        None
+    }
+
+    fn as_shader_module_mut(&mut self) -> Option<&mut FShaderModule> {
+        None
+    }
 }
 
 pub struct FBuffer {
     data: Vec<u8>,
     usages: BBufferUsages,
-    device_buffer: Option<web_sys::GpuBuffer>,
+    device_buffer: Option<wgpu::Buffer>,
 
     data_updated: bool,
     meta_updated: bool,
+
+    consolidation_id: u64,
 }
 
 impl FBuffer {
     // getter
-    pub fn size(&self) -> u32 {
-        self.data.len() as u32
+    pub fn size(&self) -> u64 {
+        self.data.len() as u64
     }
 
     // impl
@@ -74,6 +104,8 @@ impl FBuffer {
 
             data_updated: true,
             meta_updated: true,
+
+            consolidation_id: 0,
         }
     }
 
@@ -88,36 +120,32 @@ impl FBuffer {
     }
 
     pub fn update_by_array<T>(&mut self, data: &[T]) -> &mut Self {
-        self.resize((data.len() * std::mem::size_of::<T>()) as u32);
+        self.resize((data.len() * std::mem::size_of::<T>()) as u64);
         self.data.copy_from_slice(slice_to_bin_string(data));
         self.data_updated = true;
         self
     }
 
     pub fn update_by_struct<T>(&mut self, data: &T) -> &mut Self {
-        self.resize(std::mem::size_of::<T>() as u32);
+        self.resize(std::mem::size_of::<T>() as u64);
         self.data.copy_from_slice(struct_to_bin_string(data));
         self.data_updated = true;
         self
     }
 
-    pub fn resize(&mut self, size: u32) -> &mut Self {
+    pub fn resize(&mut self, size: u64) -> &mut Self {
         debug_assert!(size >= 4 && size % 4 == 0);
         self.data.resize(size as usize, 0);
         self.meta_updated = true;
         self
     }
 
-    fn upload_data(&mut self, device: &web_sys::GpuDevice) {
-        device.queue().write_buffer_with_u32_and_u8_array(
-            self.device_buffer.as_ref().unwrap(),
-            0,
-            &self.data,
-        );
+    fn upload_data(&mut self, queue: &wgpu::Queue) {
+        queue.write_buffer(self.device_buffer.as_ref().unwrap(), 0, &self.data);
         self.data_updated = false;
     }
 
-    pub fn get_device_buffer(&self) -> &web_sys::GpuBuffer {
+    pub fn get_device_buffer(&self) -> &wgpu::Buffer {
         debug_assert!(self.device_buffer.is_some());
         self.device_buffer.as_ref().unwrap()
     }
@@ -136,31 +164,33 @@ impl Drop for FBuffer {
 }
 
 impl TGPUResource for FBuffer {
-    fn update_device_resource(&mut self, encoder: &mut FWebGPUEncoder) {
+    fn update_device_resource(&mut self, encoder: &mut FDeviceEncoder) {
         debug_assert!(self.device_buffer.is_some());
 
         if self.meta_updated {
             self.device_buffer.take().unwrap().destroy();
             self.create_device_resource(encoder);
         } else if self.data_updated {
-            self.upload_data(encoder.get_device());
+            self.upload_data(encoder.get_queue());
         }
     }
 
-    fn create_device_resource(&mut self, encoder: &mut FWebGPUEncoder) {
+    fn create_device_resource(&mut self, encoder: &mut FDeviceEncoder) {
         debug_assert!(self.device_buffer.is_none());
         debug_assert!(self.data.len() % 4 == 0);
 
-        let descriptor = web_sys::GpuBufferDescriptor::new(
-            self.data.len() as f64,
-            web_sys::gpu_buffer_usage::COPY_DST | get_webgpu_buffer_usages(self.usages),
-        );
+        let descriptor = wgpu::BufferDescriptor {
+            label: None,
+            size: self.data.len() as u64,
+            usage: wgpu::BufferUsages::COPY_DST | self.usages.into(),
+            mapped_at_creation: false,
+        };
 
         let device_buffer = encoder.get_device().create_buffer(&descriptor);
         self.device_buffer = Some(device_buffer);
         self.meta_updated = false;
 
-        self.upload_data(encoder.get_device());
+        self.upload_data(encoder.get_queue());
     }
 
     fn ready(&self) -> bool {
@@ -170,8 +200,28 @@ impl TGPUResource for FBuffer {
     fn need_update(&self) -> bool {
         self.data_updated || self.meta_updated
     }
+
+    fn assign_consolidation_id(&mut self, id: u64) {
+        self.consolidation_id = id;
+    }
+
+    fn get_consolidation_id(&self) -> u64 {
+        self.consolidation_id
+    }
+
+    fn as_buffer(&self) -> Option<&FBuffer> {
+        Some(self)
+    }
+
+    fn as_buffer_mut(&mut self) -> Option<&mut FBuffer> {
+        Some(self)
+    }
 }
 
+// TODO: 所有 buffer 类型，附加上 encoder，放进 backend 里
+// 其他放进 renderer 里面
+
+// TODO：这个，拆！
 // 用于描述 buffer、texture 的数据格式。未必每个接口都支持所有格式
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EValueFormat {
@@ -183,6 +233,7 @@ pub enum EValueFormat {
     Float32x4,
 
     Unorm8x4,
+    Unorm8x4Srgb,
 
     Depth24Stencil8,
 }
@@ -198,35 +249,38 @@ impl EValueFormat {
             EValueFormat::Float32x4 => 16,
 
             EValueFormat::Unorm8x4 => 4,
+            EValueFormat::Unorm8x4Srgb => 4,
 
             EValueFormat::Depth24Stencil8 => 32,
         }
     }
 }
 
-impl Into<GpuTextureFormat> for EValueFormat {
-    fn into(self) -> GpuTextureFormat {
+impl Into<wgpu::TextureFormat> for EValueFormat {
+    fn into(self) -> wgpu::TextureFormat {
         match self {
-            EValueFormat::Uint32 => GpuTextureFormat::R32uint,
-            EValueFormat::Float32 => GpuTextureFormat::R32float,
-            EValueFormat::Float32x2 => GpuTextureFormat::Rg32float,
+            EValueFormat::Uint32 => wgpu::TextureFormat::R32Uint,
+            EValueFormat::Float32 => wgpu::TextureFormat::R32Float,
+            EValueFormat::Float32x2 => wgpu::TextureFormat::Rg32Float,
             EValueFormat::Float32x3 => unimplemented!(),
-            EValueFormat::Float32x4 => GpuTextureFormat::Rgba32float,
-            EValueFormat::Unorm8x4 => GpuTextureFormat::Bgra8unorm,
-            EValueFormat::Depth24Stencil8 => GpuTextureFormat::Depth24plusStencil8,
+            EValueFormat::Float32x4 => wgpu::TextureFormat::Rgba32Float,
+            EValueFormat::Unorm8x4 => wgpu::TextureFormat::Bgra8Unorm,
+            EValueFormat::Unorm8x4Srgb => wgpu::TextureFormat::Bgra8UnormSrgb,
+            EValueFormat::Depth24Stencil8 => wgpu::TextureFormat::Depth24PlusStencil8,
         }
     }
 }
 
-impl From<GpuTextureFormat> for EValueFormat {
-    fn from(format: GpuTextureFormat) -> Self {
+impl From<wgpu::TextureFormat> for EValueFormat {
+    fn from(format: wgpu::TextureFormat) -> Self {
         match format {
-            GpuTextureFormat::R32uint => EValueFormat::Uint32,
-            GpuTextureFormat::R32float => EValueFormat::Float32,
-            GpuTextureFormat::Rg32float => EValueFormat::Float32x2,
-            GpuTextureFormat::Rgba32float => EValueFormat::Float32x4,
-            GpuTextureFormat::Bgra8unorm => EValueFormat::Unorm8x4,
-            GpuTextureFormat::Depth24plusStencil8 => EValueFormat::Depth24Stencil8,
+            wgpu::TextureFormat::R32Uint => EValueFormat::Uint32,
+            wgpu::TextureFormat::R32Float => EValueFormat::Float32,
+            wgpu::TextureFormat::Rg32Float => EValueFormat::Float32x2,
+            wgpu::TextureFormat::Rgba32Float => EValueFormat::Float32x4,
+            wgpu::TextureFormat::Bgra8Unorm => EValueFormat::Unorm8x4,
+            wgpu::TextureFormat::Bgra8UnormSrgb => EValueFormat::Unorm8x4Srgb,
+            wgpu::TextureFormat::Depth24PlusStencil8 => EValueFormat::Depth24Stencil8,
             format => unimplemented!("{:?}", format),
         }
     }
@@ -252,14 +306,14 @@ impl EBufferViewType {
 #[derive(Clone)]
 pub struct FBufferView {
     buffer: RcMut<FBuffer>,
-    offset: u32,
-    size: u32, // count, not size in bytes
+    offset: u64,
+    size: u64, // count, not size in bytes
 
     view_type: EBufferViewType,
 }
 
 impl FBufferView {
-    pub fn new(buffer: RcMut<FBuffer>, offset: u32, size: u32, view_type: EBufferViewType) -> Self {
+    pub fn new(buffer: RcMut<FBuffer>, offset: u64, size: u64, view_type: EBufferViewType) -> Self {
         let out = Self {
             buffer: buffer,
             offset: offset,
@@ -296,11 +350,11 @@ impl FBufferView {
         self.buffer.clone()
     }
 
-    pub fn get_offset(&self) -> u32 {
+    pub fn get_offset(&self) -> u64 {
         self.offset
     }
 
-    pub fn get_size(&self) -> u32 {
+    pub fn size(&self) -> u64 {
         debug_only!(self.check().unwrap());
         self.size
     }
@@ -312,7 +366,9 @@ pub struct FShaderModule {
     vertex_stage_entry: Option<String>,
     fragment_stage_entry: Option<String>,
 
-    device_module: Option<web_sys::GpuShaderModule>,
+    device_module: Option<wgpu::ShaderModule>,
+
+    consolidation_id: u64,
 }
 
 impl FShaderModule {
@@ -324,6 +380,7 @@ impl FShaderModule {
             fragment_stage_entry: None,
 
             device_module: None,
+            consolidation_id: 0,
         }
     }
 
@@ -355,17 +412,20 @@ impl FShaderModule {
         self.fragment_stage_entry.as_ref()
     }
 
-    pub fn get_device_module(&self) -> Option<&web_sys::GpuShaderModule> {
+    pub fn get_device_module(&self) -> Option<&wgpu::ShaderModule> {
         self.device_module.as_ref()
     }
 }
 
 impl TGPUResource for FShaderModule {
-    fn create_device_resource(&mut self, encoder: &mut FWebGPUEncoder) {
+    fn create_device_resource(&mut self, encoder: &mut FDeviceEncoder) {
         debug_assert!(self.device_module.is_none());
 
-        let options = web_sys::GpuShaderModuleDescriptor::new(&self.code);
-        self.device_module = Some(encoder.get_device().create_shader_module(&options));
+        let options = wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(self.code.clone().into()),
+        };
+        self.device_module = Some(encoder.get_device().create_shader_module(options));
     }
 
     fn ready(&self) -> bool {
@@ -375,12 +435,28 @@ impl TGPUResource for FShaderModule {
     fn need_update(&self) -> bool {
         false
     }
+
+    fn assign_consolidation_id(&mut self, id: u64) {
+        self.consolidation_id = id;
+    }
+
+    fn get_consolidation_id(&self) -> u64 {
+        self.consolidation_id
+    }
+
+    fn as_shader_module(&self) -> Option<&FShaderModule> {
+        Some(self)
+    }
+
+    fn as_shader_module_mut(&mut self) -> Option<&mut FShaderModule> {
+        Some(self)
+    }
 }
 
 pub struct FDrawCommand {
     pub vertex_buffer_view: FBufferView,
     pub index_buffer_view: FBufferView,
-    pub index_count: u32,
+    pub index_count: u64,
     pub material_view: FBufferView,
     pub drawcall_view: FBufferView,
 }
@@ -389,7 +465,7 @@ impl FDrawCommand {
     pub fn new(
         vertex_buffer_view: FBufferView,
         index_buffer_view: FBufferView,
-        index_count: u32,
+        index_count: u64,
         material_view: FBufferView,
         drawcall_view: FBufferView,
     ) -> Self {
@@ -431,72 +507,103 @@ impl FDrawCommand {
         &self.drawcall_view
     }
 
-    pub fn get_index_count(&self) -> u32 {
+    pub fn get_index_count(&self) -> u64 {
         self.index_count
     }
 }
 
 pub const MAX_N_COLOR_ATTACHMENTS: usize = 4;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ELoadOp {
     Load,
     Clear,
 }
 
-impl Into<GpuLoadOp> for ELoadOp {
-    fn into(self) -> GpuLoadOp {
+impl ELoadOp {
+    pub fn to_wgpu<V: Clone>(&self, c: &V) -> wgpu::LoadOp<V> {
         match self {
-            ELoadOp::Load => GpuLoadOp::Load,
-            ELoadOp::Clear => GpuLoadOp::Clear,
+            ELoadOp::Load => wgpu::LoadOp::Load,
+            ELoadOp::Clear => wgpu::LoadOp::Clear(c.clone()),
         }
+    }
+
+    pub fn to_wgpu_color(&self, clear_val: &FClearValue) -> wgpu::LoadOp<wgpu::Color> {
+        self.to_wgpu(&match clear_val.clone() {
+            FClearValue::Zero => wgpu::Color::BLACK,
+            FClearValue::Float4 { r, g, b, a } => wgpu::Color {
+                r: r as f64,
+                g: g as f64,
+                b: b as f64,
+                a: a as f64,
+            },
+            FClearValue::Float(x) => wgpu::Color {
+                r: x as f64,
+                g: x as f64,
+                b: x as f64,
+                a: x as f64,
+            },
+        })
+    }
+
+    pub fn to_wgpu_value(&self, clear_val: FClearValue) -> wgpu::LoadOp<f32> {
+        self.to_wgpu(&match clear_val {
+            FClearValue::Zero => 0.0,
+            FClearValue::Float4 { r, g, b, a } => unimplemented!("float4 clear value"),
+            FClearValue::Float(x) => x,
+        })
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum EStoreOp {
     Store,
     Discard,
 }
 
-impl Into<GpuStoreOp> for EStoreOp {
-    fn into(self) -> GpuStoreOp {
+impl EStoreOp {
+    pub fn store(&self) -> bool {
         match self {
-            EStoreOp::Store => GpuStoreOp::Store,
-            EStoreOp::Discard => GpuStoreOp::Discard,
+            EStoreOp::Store => true,
+            EStoreOp::Discard => false,
         }
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub enum FClearValue {
     #[default]
     Zero,
-    Float4(f32, f32, f32, f32),
+    Float4 {
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+    },
     Float(f32),
 }
 
-#[derive(Clone)]
-pub struct FColorAttachment {
+#[derive(Clone, Debug)]
+pub struct FAttachment {
     pub texture_view: FTextureView,
     pub load_op: ELoadOp,
     pub store_op: EStoreOp,
-    pub clear_color: FClearValue,
+    pub clear_value: FClearValue,
 }
 
-impl FColorAttachment {
+impl FAttachment {
     pub fn new(texture_view: FTextureView, load_op: ELoadOp, store_op: EStoreOp) -> Self {
         Self {
             texture_view: texture_view,
             load_op: load_op,
             store_op: store_op,
-            clear_color: FClearValue::default(),
+            clear_value: FClearValue::default(),
         }
     }
 
     pub fn set_clear_value(&mut self, clear_value: FClearValue) -> &mut Self {
         // check: clear value vs texture format
-        self.clear_color = clear_value;
+        self.clear_value = clear_value;
         self
     }
 }
@@ -505,8 +612,8 @@ impl FColorAttachment {
 pub struct FPass {
     uniform_view: FBufferView,
 
-    color_attachments: Vec<FColorAttachment>,
-    depth_stencil_attachment: Option<FTextureView>,
+    color_attachments: Vec<FAttachment>,
+    depth_stencil_attachment: Option<FAttachment>,
 }
 
 impl FPass {
@@ -521,7 +628,7 @@ impl FPass {
 
     pub fn set_depth_stencil_attachment(
         &mut self,
-        depth_stencil_attachment: FTextureView,
+        depth_stencil_attachment: FAttachment,
     ) -> &mut Self {
         self.depth_stencil_attachment = Some(depth_stencil_attachment);
         self
@@ -532,17 +639,17 @@ impl FPass {
         self
     }
 
-    pub fn get_depth_stencil_attachment(&self) -> Option<&FTextureView> {
-        self.depth_stencil_attachment.as_ref()
+    pub fn get_depth_stencil_attachment(&self) -> &Option<FAttachment> {
+        &self.depth_stencil_attachment
     }
 
-    pub fn set_color_attachments(&mut self, color_attachments: Vec<FColorAttachment>) -> &mut Self {
+    pub fn set_color_attachments(&mut self, color_attachments: Vec<FAttachment>) -> &mut Self {
         debug_assert!(color_attachments.len() <= MAX_N_COLOR_ATTACHMENTS);
         self.color_attachments = color_attachments;
         self
     }
 
-    pub fn get_color_attachments(&self) -> &Vec<FColorAttachment> {
+    pub fn get_color_attachments(&self) -> &Vec<FAttachment> {
         &self.color_attachments
     }
 
@@ -554,14 +661,14 @@ impl FPass {
 pub struct FMesh {
     vertex_buffer_view: FBufferView,
     index_buffer_view: FBufferView,
-    index_count: u32,
+    index_count: u64,
 }
 
 impl FMesh {
     pub fn new(
         vertex_buffer_view: FBufferView,
         index_buffer_view: FBufferView,
-        index_count: u32,
+        index_count: u64,
     ) -> Self {
         Self {
             vertex_buffer_view: vertex_buffer_view,
@@ -578,7 +685,7 @@ impl FMesh {
         &self.index_buffer_view
     }
 
-    pub fn get_index_count(&self) -> u32 {
+    pub fn get_index_count(&self) -> u64 {
         self.index_count
     }
 
@@ -614,7 +721,7 @@ impl FMesh {
         let vertex_buffer_view = FBufferView::new(
             vertex_buffer,
             0,
-            vertex_buffer_size as u32,
+            vertex_buffer_size as u64,
             EBufferViewType::Vertex,
         );
 
@@ -624,14 +731,14 @@ impl FMesh {
         let index_buffer_view = FBufferView::new(
             index_buffer,
             0,
-            index_buffer_size as u32,
+            index_buffer_size as u64,
             EBufferViewType::Index,
         );
 
         Self::new(
             vertex_buffer_view,
             index_buffer_view,
-            sub_mesh.indices.len() as u32,
+            sub_mesh.indices.len() as u64,
         )
     }
 }
@@ -655,7 +762,7 @@ impl FMaterial {
     pub fn new(h: HooEngineRef, shader: String) -> Self {
         // todo: reflection
         let buffer = FBuffer::new_and_manage(h, BBufferUsages::Uniform);
-        let buffer_size = 16u32;
+        let buffer_size = 16u64;
         buffer.borrow_mut().resize(buffer_size);
         let uniform_view = FBufferView::new(buffer, 0, buffer_size, EBufferViewType::Uniform);
 
@@ -704,7 +811,7 @@ impl FMaterial {
 }
 
 pub trait TRenderObject {
-    fn encode(&self, encoder: &mut FWebGPUEncoder, pass_variant: &str);
+    fn encode(&self, encoder: &mut FDeviceEncoder, pass_variant: &str);
 }
 
 #[repr(packed)]
@@ -760,10 +867,12 @@ impl FRenderObject {
     pub fn new(h: HooEngineRef, model: FModel) -> Self {
         let uniform_buffer = FBuffer::new_and_manage(h, BBufferUsages::Uniform);
 
-        let mut uniform_struct = DrawCallUniform::default();
-        uniform_buffer
-            .borrow_mut()
-            .update_by_struct(&uniform_struct);
+        let uniform_struct = DrawCallUniform::default();
+        {
+            uniform_buffer
+                .borrow_mut()
+                .update_by_struct(&uniform_struct);
+        }
         let uniform_view = FBufferView::new_uniform(uniform_buffer);
 
         let mut out = Self {
@@ -805,7 +914,7 @@ impl FRenderObject {
             .update_by_struct(&uniform_struct);
     }
 
-    pub fn encode(&self, encoder: &mut FWebGPUEncoder, pass_variant: &str) {
+    pub fn encode(&self, encoder: &mut FPassEncoder, pass_variant: &str) {
         let mesh = self.model.mesh.borrow();
         let material = self.model.material.borrow();
 
@@ -824,44 +933,46 @@ impl FRenderObject {
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub struct BTextureUsages: u32 {
+    pub struct BTextureUsages: u64 {
         const Attachment = 0x1;
         const Sampled = 0x4;
         const UnorderedAccess = 0x8;
     }
 }
 
-impl BTextureUsages {
-    pub fn to_webgpu(&self) -> u32 {
-        let mut res = 0u32;
+impl Into<wgpu::TextureUsages> for BTextureUsages {
+    fn into(self) -> wgpu::TextureUsages {
+        let mut res = wgpu::TextureUsages::empty();
         if self.contains(BTextureUsages::Attachment) {
-            res |= web_sys::gpu_texture_usage::RENDER_ATTACHMENT;
+            res |= wgpu::TextureUsages::RENDER_ATTACHMENT;
         }
         if self.contains(BTextureUsages::Sampled) {
-            res |= web_sys::gpu_texture_usage::TEXTURE_BINDING;
+            res |= wgpu::TextureUsages::TEXTURE_BINDING;
         }
         if self.contains(BTextureUsages::UnorderedAccess) {
-            res |= web_sys::gpu_texture_usage::STORAGE_BINDING;
+            res |= wgpu::TextureUsages::STORAGE_BINDING;
         }
         res
     }
 }
 
+#[derive(Debug)]
 pub struct FTexture {
     usages: BTextureUsages,
     format: EValueFormat,
     width: u32,
     height: u32,
-    device_texture: Option<web_sys::GpuTexture>,
+    device_texture: Option<wgpu::Texture>,
 
     updated: bool,
-    is_swapchain: bool,
+
+    consolidation_id: u64,
 }
 
 impl FTexture {
     fn new_internal(_: HooEngineRef, format: EValueFormat, usages: BTextureUsages) -> Self {
         #[cfg(debug_assertions)]
-        let _ = Into::<web_sys::GpuTextureFormat>::into(format);
+        let _ = Into::<wgpu::TextureFormat>::into(format);
 
         Self {
             usages: usages,
@@ -870,7 +981,7 @@ impl FTexture {
             height: 1,
             device_texture: None,
             updated: false,
-            is_swapchain: false,
+            consolidation_id: 0,
         }
     }
 
@@ -888,77 +999,19 @@ impl FTexture {
         res
     }
 
-    pub fn new_swapchain_texture(_: HooEngineRef, context: &GpuCanvasContext) -> Self {
-        let device_texture = context.get_current_texture();
-
-        let width = device_texture.width();
-        let height = device_texture.height();
-        let format = device_texture.format();
-
-        Self {
-            usages: BTextureUsages::Attachment,
-            format: format.into(),
-            width: width,
-            height: height,
-            device_texture: Some(device_texture),
-            updated: false,
-            is_swapchain: true,
-        }
-    }
-
-    pub fn new_swapchain_texture_and_manage(
-        h: HooEngineRef,
-        context: &GpuCanvasContext,
-    ) -> RcMut<Self> {
-        let res = rcmut!(Self::new_swapchain_texture(h, context));
-        h.upgrade()
-            .unwrap()
-            .borrow()
-            .get_resources()
-            .add_gpu_resource(res.clone());
-        res
-    }
-
-    pub fn update_swapchain_texture(&mut self, context: &GpuCanvasContext) {
-        assert!(self.is_swapchain);
-
-        let device_texture = context.get_current_texture();
-
-        let width = device_texture.width();
-        let height = device_texture.height();
-        let format = device_texture.format();
-
-        self.width = width;
-        self.height = height;
-        self.format = format.into();
-        self.device_texture = Some(device_texture);
-        self.updated = true;
-    }
-
-    pub fn clear_swapchain_texture(&mut self) {
-        assert!(self.is_swapchain);
-        self.device_texture = None;
-    }
-
     pub fn set_width(&mut self, width: u32) -> &mut Self {
-        assert!(!self.is_swapchain);
-
         self.width = width;
         self.updated = true;
         self
     }
 
     pub fn set_height(&mut self, height: u32) -> &mut Self {
-        assert!(!self.is_swapchain);
-
         self.height = height;
         self.updated = true;
         self
     }
 
     pub fn set_size(&mut self, (width, height): (u32, u32)) -> &mut Self {
-        assert!(!self.is_swapchain);
-
         self.width = width;
         self.height = height;
         self.updated = true;
@@ -973,39 +1026,43 @@ impl FTexture {
         self.format
     }
 
-    pub fn get_device_texture(&self) -> &web_sys::GpuTexture {
+    pub fn get_device_texture(&self) -> &wgpu::Texture {
         self.device_texture.as_ref().unwrap()
     }
 
     pub fn get_width(&self) -> u32 {
-        if self.is_swapchain {
-            return self.device_texture.as_ref().unwrap().width();
-        }
         self.width
     }
 
     pub fn get_height(&self) -> u32 {
-        if self.is_swapchain {
-            return self.device_texture.as_ref().unwrap().height();
-        }
         self.height
     }
 
-    pub fn get_size(&self) -> (u32, u32) {
+    pub fn size(&self) -> (u32, u32) {
         (self.get_width(), self.get_height())
     }
 }
 
 impl TGPUResource for FTexture {
-    fn create_device_resource(&mut self, encoder: &mut FWebGPUEncoder) {
+    fn create_device_resource(&mut self, encoder: &mut FDeviceEncoder) {
         debug_assert!(self.device_texture.is_none());
 
         let device = encoder.get_device();
-        let desc = GpuTextureDescriptor::new(
-            self.format.into(),
-            &jsarray([self.width, self.height, 1].as_slice()),
-            self.usages.to_webgpu(),
-        );
+        let desc = wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            format: self.format.into(),
+            dimension: wgpu::TextureDimension::D2,
+            usage: self.usages.into(),
+            view_formats: &[Into::<wgpu::TextureFormat>::into(self.format)], // TODO：还可以允许对应的 SRGB
+        };
+
         self.device_texture = Some(device.create_texture(&desc));
         self.updated = false;
     }
@@ -1014,7 +1071,7 @@ impl TGPUResource for FTexture {
         self.device_texture.is_some()
     }
 
-    fn update_device_resource(&mut self, encoder: &mut FWebGPUEncoder) {
+    fn update_device_resource(&mut self, encoder: &mut FDeviceEncoder) {
         debug_assert!(self.device_texture.is_some());
         if !self.updated {
             return;
@@ -1027,6 +1084,22 @@ impl TGPUResource for FTexture {
     fn need_update(&self) -> bool {
         self.updated
     }
+
+    fn assign_consolidation_id(&mut self, id: u64) {
+        self.consolidation_id = id;
+    }
+
+    fn get_consolidation_id(&self) -> u64 {
+        self.consolidation_id
+    }
+
+    fn as_texture(&self) -> Option<&FTexture> {
+        Some(self)
+    }
+
+    fn as_texture_mut(&mut self) -> Option<&mut FTexture> {
+        Some(self)
+    }
 }
 
 impl Drop for FTexture {
@@ -1037,21 +1110,70 @@ impl Drop for FTexture {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+enum FTextureViewType {
+    Texture(RcMut<FTexture>),
+    SwapChain,
+}
+
+#[derive(Clone, Debug)]
 pub struct FTextureView {
-    texture: RcMut<FTexture>,
+    texture: FTextureViewType,
 }
 
 impl FTextureView {
     pub fn new(texture: RcMut<FTexture>) -> Self {
-        Self { texture: texture }
+        Self {
+            texture: FTextureViewType::Texture(texture),
+        }
+    }
+
+    pub fn new_swapchain_view() -> Self {
+        Self {
+            texture: FTextureViewType::SwapChain,
+        }
     }
 
     pub fn get_texture(&self) -> RcMut<FTexture> {
-        self.texture.clone()
+        match &self.texture {
+            FTextureViewType::Texture(texture) => texture.clone(),
+            FTextureViewType::SwapChain => panic!("Texture is a SwapChain."),
+        }
     }
 
-    pub fn get_device_texture_view(&self) -> web_sys::GpuTextureView {
-        self.texture.borrow_mut().get_device_texture().create_view()
+    pub fn get_format(&self, encoder: &FDeviceEncoder) -> EValueFormat {
+        match &self.texture {
+            FTextureViewType::Texture(texture) => texture.borrow().get_format(),
+            FTextureViewType::SwapChain => encoder.get_swapchain_format(),
+        }
+    }
+
+    fn create_device_texture_view(&self, device_texture: &wgpu::Texture) -> wgpu::TextureView {
+        // 要么做成 GPUResource，要么就不要直接返回 device 资源。倾向于 device
+        let desc = wgpu::TextureViewDescriptor {
+            label: None,
+            format: None,
+            dimension: None,
+            aspect: wgpu::TextureAspect::All, // all / depth / stencil
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        };
+
+        return device_texture.create_view(&desc);
+    }
+
+    pub fn get_device_texture_view(&self, encoder: &FDeviceEncoder) -> wgpu::TextureView {
+        match &self.texture {
+            FTextureViewType::Texture(texture) => {
+                self.create_device_texture_view(texture.borrow().get_device_texture())
+            }
+            FTextureViewType::SwapChain => {
+                let surf = encoder.get_swapchain_texture();
+                let tex = &surf.as_ref().unwrap().texture;
+                self.create_device_texture_view(tex)
+            }
+        }
     }
 }

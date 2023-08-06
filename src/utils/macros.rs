@@ -44,7 +44,7 @@ macro_rules! rcmut {
 #[macro_export]
 macro_rules! hoo_log {
     ($($arg:tt)*) => {{
-        web_sys::console::log_1(&format!($($arg)*).into());
+        &println!($($arg)*);
     }};
 }
 

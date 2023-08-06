@@ -6,7 +6,7 @@ use std::{
     panic,
     rc::Rc,
 };
-use wasm_bindgen::prelude::*;
+// use wasm_bindgen::prelude::*;
 
 use crate::{
     editor::importer::load_gltf_from_slice,
@@ -20,10 +20,10 @@ mod io;
 mod renderer;
 mod utils;
 
-#[wasm_bindgen(start)]
-fn initialize() {
-    panic::set_hook(Box::new(console_error_panic_hook::hook));
-}
+// #[wasm_bindgen(start)]
+// fn initialize() {
+//     panic::set_hook(Box::new(console_error_panic_hook::hook));
+// }
 
 pub struct HooEngine {
     // graphics
@@ -38,7 +38,7 @@ type HooEngineRef<'a> = &'a std::rc::Weak<RefCell<HooEngine>>;
 type HooEngineWeak = std::rc::Weak<RefCell<HooEngine>>;
 
 impl HooEngine {
-    async fn new_async(context: web_sys::GpuCanvasContext) -> Rc<RefCell<HooEngine>> {
+    pub async fn new_async(window: &winit::window::Window) -> Rc<RefCell<HooEngine>> {
         let out = HooEngine {
             // assume: do not access HooEngine::renderer in init of Renderer
             #[allow(invalid_value)]
@@ -46,7 +46,7 @@ impl HooEngine {
             resources: RefCell::new(FGlobalResources::new()),
         };
         let out_ref = rcmut!(out);
-        let renderer = Renderer::new_async(&Rc::downgrade(&out_ref), context).await;
+        let renderer = Renderer::new_async(&Rc::downgrade(&out_ref), window).await;
 
         unsafe {
             std::ptr::copy_nonoverlapping(&renderer, out_ref.borrow_mut().renderer.as_ptr(), 1)
@@ -63,7 +63,7 @@ impl HooEngine {
         return out_ref;
     }
 
-    fn next_frame(&self) {
+    pub fn next_frame(&self) {
         self.renderer.borrow_mut().next_frame();
     }
 
@@ -84,19 +84,19 @@ impl HooEngine {
     }
 }
 
-#[wasm_bindgen]
-pub struct JsHooEngine {
-    engine: Rc<RefCell<HooEngine>>,
-}
+// #[wasm_bindgen]
+// pub struct JsHooEngine {
+//     engine: Rc<RefCell<HooEngine>>,
+// }
 
-#[wasm_bindgen]
-impl JsHooEngine {
-    pub async fn new_async(context: web_sys::GpuCanvasContext) -> Self {
-        let engine = HooEngine::new_async(context).await;
-        Self { engine }
-    }
+// #[wasm_bindgen]
+// impl JsHooEngine {
+//     pub async fn new_async(context: web_sys::GpuCanvasContext) -> Self {
+//         let engine = HooEngine::new_async(context).await;
+//         Self { engine }
+//     }
 
-    pub fn next_frame(&mut self) {
-        self.engine.borrow().next_frame();
-    }
-}
+//     pub fn next_frame(&mut self) {
+//         self.engine.borrow().next_frame();
+//     }
+// }
