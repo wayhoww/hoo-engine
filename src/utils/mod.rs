@@ -1,7 +1,7 @@
-pub mod macros;
-pub mod memory;
-pub mod network;
-pub mod types;
+mod macros;
+mod memory;
+mod network;
+mod types;
 
 pub use macros::*;
 pub use memory::*;

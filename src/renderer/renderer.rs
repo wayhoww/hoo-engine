@@ -1,10 +1,7 @@
+use crate::device::graphics::*;
 use crate::*;
 
-use super::encoder::*;
 use super::pipeline::FGraphicsPipeline;
-
-
-
 
 pub struct Renderer {
     hoo_engine: HooEngineWeak,

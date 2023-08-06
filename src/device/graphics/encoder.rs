@@ -1,8 +1,10 @@
 use std::cell::{Ref, RefCell};
+use std::convert::TryFrom;
 
-use crate::{utils::types::RcMut, HooEngineRef, HooEngineWeak};
+use crate::utils::*;
+use crate::*;
 
-use super::resource::{FBufferView, FDrawCommand, FPass, FShaderModule, TGPUResource, EValueFormat};
+use super::resource::*;
 
 use strum::*;
 use strum_macros::*;
@@ -20,37 +22,38 @@ impl FPipeline {
     fn create_device_resource_with_pass(
         &mut self,
         pass_encoder: &mut FPassEncoder,
+        vertex_entries: &[FVertexEntry],
         shader_module: &RcMut<FShaderModule>,
     ) -> wgpu::RenderPipeline {
         let logical_shader_module = shader_module.borrow();
         let shader_module = logical_shader_module.get_device_module().unwrap();
 
-        let vertex_buffer_layout = wgpu::VertexBufferLayout {
-            array_stride: 32,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: 12,
-                    shader_location: 1,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 24,
-                    shader_location: 2,
-                },
-            ],
-        };
+        let attributes = vertex_entries
+            .iter()
+            .map(|entry| {
+                [wgpu::VertexAttribute {
+                    format: entry.format.into(),
+                    offset: entry.offset,
+                    shader_location: entry.location,
+                }]
+            })
+            .collect::<Vec<_>>();
+
+        let entries = (vertex_entries.iter().zip(attributes.iter()))
+            .map(|(entry, attr)| {
+                let layout = wgpu::VertexBufferLayout {
+                    array_stride: entry.stride,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: attr,
+                };
+                layout
+            })
+            .collect::<Vec<_>>();
 
         let vertex_state = wgpu::VertexState {
             module: shader_module,
             entry_point: logical_shader_module.get_vertex_stage_entry().unwrap(),
-            buffers: &[vertex_buffer_layout], // TODO: SOA
+            buffers: &entries,
         };
 
         let color_attachments: Vec<_> = pass_encoder
@@ -152,7 +155,7 @@ pub struct FDeviceEncoder {
     surface: wgpu::Surface,
     swapchain_texture: RefCell<Option<wgpu::SurfaceTexture>>,
     swapchain_size: (u32, u32),
-    swapchain_format: EValueFormat,
+    swapchain_format: ETextureFormat,
 
     bind_group_layouts: Vec<wgpu::BindGroupLayout>,
 
@@ -201,7 +204,7 @@ impl FDeviceEncoder {
         return self.swapchain_texture.borrow();
     }
 
-    pub fn get_swapchain_format(&self) -> EValueFormat {
+    pub fn get_swapchain_format(&self) -> ETextureFormat {
         self.swapchain_format
     }
 
@@ -273,13 +276,12 @@ impl FDeviceEncoder {
             surface,
             swapchain_size: (size.width, size.height),
             swapchain_texture: RefCell::new(Some(surface_texture)),
-            swapchain_format: EValueFormat::from(surface_format),
+            swapchain_format: ETextureFormat::try_from(surface_format).unwrap(),
             bind_group_layouts,
             uniform_buffer_view_global: None,
             uniform_buffer_view_task: None,
         }
     }
-
 
     pub fn get_swapchain_size(&self) -> (u32, u32) {
         self.swapchain_size
@@ -362,7 +364,7 @@ impl FDeviceEncoder {
     }
 
     pub fn present(&mut self) {
-        let _  = self.get_swapchain_texture();
+        let _ = self.get_swapchain_texture();
         self.swapchain_texture.take().unwrap().present();
     }
 }
@@ -448,9 +450,14 @@ impl FFrameEncoder<'_, '_, '_> {
 }
 
 impl<'c> FPassEncoder<'_, '_, 'c, '_, '_> {
-    pub fn setup_pipeline(&mut self, shader_module: &RcMut<FShaderModule>) {
+    pub fn setup_pipeline(
+        &mut self,
+        vertex_entries: &[FVertexEntry],
+        shader_module: &RcMut<FShaderModule>,
+    ) {
         let mut pipeline = FPipeline::new();
-        let device_pipeline = pipeline.create_device_resource_with_pass(self, shader_module);
+        let device_pipeline =
+            pipeline.create_device_resource_with_pass(self, vertex_entries, shader_module);
         let pipeline_ref = self.render_pipeline_cache.alloc(device_pipeline);
         self.render_pass.set_pipeline(pipeline_ref);
     }
@@ -476,22 +483,25 @@ impl<'c> FPassEncoder<'_, '_, 'c, '_, '_> {
     }
 
     pub fn draw(&mut self, draw_command: &FDrawCommand) {
-        let vertex_buffer_view = draw_command.get_vertex_buffer_view();
+        let vertex_buffers = draw_command.get_vertex_buffers();
         let index_buffer_view = draw_command.get_index_buffer_view();
 
-        let vertex_buffer = vertex_buffer_view.get_buffer();
-        let vertex_buffer_ref = self.resources
-            [vertex_buffer.borrow().get_consolidation_id() as usize]
-            .as_buffer()
-            .unwrap();
-        let vertex_buffer_offset = vertex_buffer_view.get_offset();
-        let vertex_buffer_size = vertex_buffer_view.size();
-        self.render_pass.set_vertex_buffer(
-            0,
-            vertex_buffer_ref
-                .get_device_buffer()
-                .slice(vertex_buffer_offset..(vertex_buffer_offset + vertex_buffer_size)),
-        );
+        for vertex_buffer_entry in vertex_buffers.iter() {
+            let vertex_buffer_view = &vertex_buffer_entry.view;
+            let vertex_buffer = vertex_buffer_view.get_buffer();
+            let vertex_buffer_ref = self.resources
+                [vertex_buffer.borrow().get_consolidation_id() as usize]
+                .as_buffer()
+                .unwrap();
+            let vertex_buffer_offset = vertex_buffer_view.get_offset();
+            let vertex_buffer_size = vertex_buffer_view.size();
+            self.render_pass.set_vertex_buffer(
+                vertex_buffer_entry.location,
+                vertex_buffer_ref
+                    .get_device_buffer()
+                    .slice(vertex_buffer_offset..(vertex_buffer_offset + vertex_buffer_size)),
+            );
+        }
 
         let index_buffer = index_buffer_view.get_buffer();
         let index_buffer_ref = self.resources

@@ -1,4 +1,5 @@
-use hoo_engine::HooEngine;
+use hoo_engine::*;
+
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},

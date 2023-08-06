@@ -1,3 +1,11 @@
+mod bundle;
+mod device;
+mod editor;
+mod global;
+mod io;
+mod renderer;
+mod utils;
+
 use global::resources::FGlobalResources;
 
 use std::{
@@ -5,21 +13,8 @@ use std::{
     mem::MaybeUninit,
     rc::Rc,
 };
-// use wasm_bindgen::prelude::*;
 
-use crate::renderer::renderer::Renderer;
-
-mod bundle;
-mod editor;
-mod global;
-mod io;
-mod renderer;
-mod utils;
-
-// #[wasm_bindgen(start)]
-// fn initialize() {
-//     panic::set_hook(Box::new(console_error_panic_hook::hook));
-// }
+use crate::renderer::Renderer;
 
 pub struct HooEngine {
     // graphics

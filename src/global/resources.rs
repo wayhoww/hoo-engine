@@ -3,10 +3,8 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::{
-    renderer::{encoder::FDeviceEncoder, resource::TGPUResource},
-    utils::types::RcMut,
-};
+use crate::device::graphics::*;
+use crate::utils::*;
 
 pub struct FGlobalResources {
     gpu_resources: RefCell<Vec<Weak<RefCell<dyn TGPUResource>>>>,

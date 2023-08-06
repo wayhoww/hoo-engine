@@ -1,23 +1,9 @@
-use bitflags::bitflags;
-
-use crate::{
-    bundle, editor::importer::load_gltf_from_slice, rcmut, utils::*, HooEngineRef,
-    HooEngineWeak,
-};
-
-use super::{encoder::*, resource::*};
+use crate::device::graphics::*;
+use crate::editor::importer::load_gltf_from_slice;
+use crate::utils::*;
+use crate::*;
 
 use nalgebra_glm as glm;
-
-bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    struct Flags: u64 {
-        const A = 0b00000001;
-        const B = 0b00000010;
-        const C = 0b00000100;
-        const ABC = Self::A.bits() | Self::B.bits() | Self::C.bits();
-    }
-}
 
 pub struct FGraphicsPipeline {
     hoo_engine: HooEngineWeak,
@@ -98,42 +84,16 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
     // fragment_out.depth = vertex_out.position.w / vertex_out.position.z;
     return fragment_out;
 }
-
-
-@vertex
-fn vsMain_depthOnly(
-    @location(0) pos: vec3f, 
-    @location(1) normal: vec3f, 
-    @location(2) uv: vec2f
-) -> VertexOut {
-    // cDrawCall.matrix_projection * 
-    var vertex_out: VertexOut;
-    vertex_out.position = cDrawCall.transform_mvp * vec4f(pos.xyz, 1.0);
-    vertex_out.uv0 = uv;
-    vertex_out.normal_local = normal;
-    
-    return vertex_out;
-}
-
-@fragment
-fn fsMain_depthOnly(vertex_out: VertexOut) -> FragmentOut {
-    // w: linear depth
-    // w/z: 0~1, 0 means near
-
-    var fragment_out: FragmentOut;
-    fragment_out.color = vec4f(abs(vertex_out.normal_local.xyz) + 0.3, 1.0);
-    // fragment_out.depth = vertex_out.position.w / vertex_out.position.z;
-    return fragment_out;
-}
         "#;
         let material = rcmut!(FMaterial::new(h, shader_code.into()));
-        material.borrow_mut().enable_pass_variant("base".into());
+        material.borrow_mut().enable_shader_profile("base".into());
         material
             .borrow_mut()
-            .enable_pass_variant("depthOnly".into());
+            .enable_shader_profile("depthOnly".into());
 
         // mesh
         let load_result = load_gltf_from_slice(bundle::gltf_cube());
+
         let mesh = rcmut!(FMesh::from_file_resource(
             h,
             &load_result.unwrap()[0].sub_meshes[0]
@@ -150,8 +110,11 @@ fn fsMain_depthOnly(vertex_out: VertexOut) -> FragmentOut {
         let uniform_view = FBufferView::new_uniform(default_uniform_buffer.clone());
 
         // pass
-        let depth_texture =
-            FTexture::new_and_manage(h, EValueFormat::Depth24Stencil8, BTextureUsages::Attachment);
+        let depth_texture = FTexture::new_and_manage(
+            h,
+            ETextureFormat::Depth24PlusStencil8,
+            BTextureUsages::Attachment,
+        );
         depth_texture
             .borrow_mut()
             .set_size(encoder.get_swapchain_size());
@@ -206,20 +169,9 @@ fn fsMain_depthOnly(vertex_out: VertexOut) -> FragmentOut {
             size.0 as f32 / size.1 as f32,
             glm::pi::<f32>() * 0.6,
             0.1,
-            100.0,
+            1000.0,
         );
 
-        // let mut uniform_buffer_data = Vec::new();
-        // uniform_buffer_data.extend_from_slice(mat_model.as_slice());
-        // uniform_buffer_data.extend_from_slice(mat_view.as_slice());
-        // uniform_buffer_data.extend_from_slice(mat_proj.as_slice());
-
-        // self.uniform_buffer
-        //     .borrow_mut()
-        //     .update_by_array(&uniform_buffer_data);
-        // self.uniform_buffer.borrow_mut().resize(1024);
-
-        // TODO: should be updated somewhere else
         encoder.set_global_uniform_buffer_view(self.uniform_view.clone());
 
         self.render_object1
@@ -264,11 +216,9 @@ fn fsMain_depthOnly(vertex_out: VertexOut) -> FragmentOut {
                 self.render_object1.encode(pass_encoder, "base");
             });
 
-            // encoder.begin_render_pass(&self.pass2);
-            // self.render_object2.encode(encoder, "base");
-            // encoder.end_render_pass();
-
-            // frame_encoder.present();
+            frame_encoder.encode_render_pass(&self.pass2, |pass_encoder| {
+                self.render_object2.encode(pass_encoder, "base");
+            });
         });
 
         encoder.present();
