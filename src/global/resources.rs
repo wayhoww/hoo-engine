@@ -1,5 +1,5 @@
 use std::{
-    cell::{Ref, RefCell, RefMut},
+    cell::RefCell,
     rc::{Rc, Weak},
 };
 
@@ -49,7 +49,7 @@ impl FGlobalResources {
                 if resource.need_update() {
                     resource.update_device_resource(encoder);
                 };
-                Rc::downgrade(&rc_res)
+                Rc::downgrade(rc_res)
             })
             .collect::<Vec<_>>();
 
@@ -63,12 +63,4 @@ impl FGlobalResources {
 
         strong_res
     }
-}
-
-struct XT<'a> {
-    r: &'a i32,
-}
-
-fn foo2<'a>(x: &mut XT<'a>, y: &'a std::vec::Vec<std::cell::Ref<'a, i32>>) {
-    x.r = &y[0];
 }

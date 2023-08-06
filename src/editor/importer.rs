@@ -1,6 +1,6 @@
 use crate::check;
 use crate::io::resource::{RMesh, RSubMesh};
-use crate::{hoo_log, utils::memory::bin_string_to_vec};
+use crate::utils::bin_string_to_vec;
 
 extern crate nalgebra_glm as glm;
 
@@ -44,7 +44,7 @@ pub fn load_gltf_from_slice<S: AsRef<[u8]>>(slice: S) -> Result<Vec<RMesh>, Stri
                 check!(
                     accessor.count()
                         * accessor.data_type().size()
-                        * accessor.dimensions().multiplicity() as usize
+                        * accessor.dimensions().multiplicity()
                         == view.length()
                 );
 
@@ -55,7 +55,7 @@ pub fn load_gltf_from_slice<S: AsRef<[u8]>>(slice: S) -> Result<Vec<RMesh>, Stri
                         check!(out_submesh.positions.is_empty());
 
                         out_submesh.positions = bin_string_to_vec::<f32>(data)
-                            .chunks(accessor.dimensions().multiplicity() as usize)
+                            .chunks(accessor.dimensions().multiplicity())
                             .map(|x| glm::vec3(x[0], x[1], x[2]))
                             .collect();
                     }
@@ -65,7 +65,7 @@ pub fn load_gltf_from_slice<S: AsRef<[u8]>>(slice: S) -> Result<Vec<RMesh>, Stri
                         // check!(out_submesh.normals.is_none());
 
                         out_submesh.normals = bin_string_to_vec::<f32>(data)
-                            .chunks(accessor.dimensions().multiplicity() as usize)
+                            .chunks(accessor.dimensions().multiplicity())
                             .map(|x| glm::vec3(x[0], x[1], x[2]))
                             .collect();
                     }
@@ -75,12 +75,12 @@ pub fn load_gltf_from_slice<S: AsRef<[u8]>>(slice: S) -> Result<Vec<RMesh>, Stri
                         // check!(out_submesh.uv0.is_none());
 
                         out_submesh.uv0 = bin_string_to_vec::<f32>(data)
-                            .chunks(accessor.dimensions().multiplicity() as usize)
+                            .chunks(accessor.dimensions().multiplicity())
                             .map(|x| glm::vec2(x[0], x[1]))
                             .collect();
                     }
                     _ => {
-                        hoo_log!("Unsupported semantic: {:?}", semantic);
+                        eprintln!("Unsupported semantic: {:?}", semantic);
                     }
                 }
             }

@@ -1,9 +1,9 @@
 use bitflags::bitflags;
-use std::{collections::HashMap, default};
+use std::collections::HashMap;
 use wgpu;
 
 use crate::{
-    check, debug_only, hoo_log, io::resource::RSubMesh, rcmut,
+    check, debug_only, io::resource::RSubMesh, rcmut,
     renderer::utils::slice_to_bin_string, utils::types::RcMut, HooEngineRef, HooEngineWeak,
 };
 
@@ -23,17 +23,17 @@ bitflags! {
     }
 }
 
-impl Into<wgpu::BufferUsages> for BBufferUsages {
-    fn into(self) -> wgpu::BufferUsages {
+impl From<BBufferUsages> for wgpu::BufferUsages {
+    fn from(val: BBufferUsages) -> Self {
         let mut ret = wgpu::BufferUsages::empty();
 
-        if self.contains(BBufferUsages::Vertex) {
+        if val.contains(BBufferUsages::Vertex) {
             ret |= wgpu::BufferUsages::VERTEX;
         }
-        if self.contains(BBufferUsages::Index) {
+        if val.contains(BBufferUsages::Index) {
             ret |= wgpu::BufferUsages::INDEX;
         }
-        if self.contains(BBufferUsages::Uniform) {
+        if val.contains(BBufferUsages::Uniform) {
             ret |= wgpu::BufferUsages::UNIFORM;
         }
 
@@ -46,7 +46,7 @@ pub trait TGPUResource {
     fn update_device_resource(&mut self, _: &mut FDeviceEncoder) {}
     fn ready(&self) -> bool; // 有数据，但可能需要更新
     fn need_update(&self) -> bool {
-        return false;
+        false
     } // 需要更新
 
     fn assign_consolidation_id(&mut self, _: u64);
@@ -99,7 +99,7 @@ impl FBuffer {
     fn new(usages: BBufferUsages) -> Self {
         Self {
             data: vec![0; 4], // avoid empty buffer
-            usages: usages,
+            usages,
             device_buffer: None,
 
             data_updated: true,
@@ -120,7 +120,7 @@ impl FBuffer {
     }
 
     pub fn update_by_array<T>(&mut self, data: &[T]) -> &mut Self {
-        self.resize((data.len() * std::mem::size_of::<T>()) as u64);
+        self.resize(std::mem::size_of_val(data) as u64);
         self.data.copy_from_slice(slice_to_bin_string(data));
         self.data_updated = true;
         self
@@ -315,11 +315,11 @@ pub struct FBufferView {
 impl FBufferView {
     pub fn new(buffer: RcMut<FBuffer>, offset: u64, size: u64, view_type: EBufferViewType) -> Self {
         let out = Self {
-            buffer: buffer,
-            offset: offset,
-            size: size,
+            buffer,
+            offset,
+            size,
 
-            view_type: view_type,
+            view_type,
         };
 
         debug_only!(out.check().unwrap());
@@ -343,7 +343,7 @@ impl FBufferView {
             .usages
             .contains(self.view_type.required_usage()));
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn get_buffer(&self) -> RcMut<FBuffer> {
@@ -374,7 +374,7 @@ pub struct FShaderModule {
 impl FShaderModule {
     fn new(code: String) -> Self {
         Self {
-            code: code,
+            code,
 
             vertex_stage_entry: None,
             fragment_stage_entry: None,
@@ -470,11 +470,11 @@ impl FDrawCommand {
         drawcall_view: FBufferView,
     ) -> Self {
         let out = Self {
-            vertex_buffer_view: vertex_buffer_view,
-            index_buffer_view: index_buffer_view,
-            index_count: index_count,
-            material_view: material_view,
-            drawcall_view: drawcall_view,
+            vertex_buffer_view,
+            index_buffer_view,
+            index_count,
+            material_view,
+            drawcall_view,
         };
 
         debug_only!(out.check().unwrap());
@@ -488,7 +488,7 @@ impl FDrawCommand {
         check!(self.index_count * 4 <= self.index_buffer_view.size);
         // todo: check vertex buffer size
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn get_index_buffer_view(&self) -> &FBufferView {
@@ -549,7 +549,7 @@ impl ELoadOp {
     pub fn to_wgpu_value(&self, clear_val: FClearValue) -> wgpu::LoadOp<f32> {
         self.to_wgpu(&match clear_val {
             FClearValue::Zero => 0.0,
-            FClearValue::Float4 { r, g, b, a } => unimplemented!("float4 clear value"),
+            FClearValue::Float4 { r: _, g: _, b: _, a: _ } => unimplemented!("float4 clear value"),
             FClearValue::Float(x) => x,
         })
     }
@@ -594,9 +594,9 @@ pub struct FAttachment {
 impl FAttachment {
     pub fn new(texture_view: FTextureView, load_op: ELoadOp, store_op: EStoreOp) -> Self {
         Self {
-            texture_view: texture_view,
-            load_op: load_op,
-            store_op: store_op,
+            texture_view,
+            load_op,
+            store_op,
             clear_value: FClearValue::default(),
         }
     }
@@ -618,9 +618,8 @@ pub struct FPass {
 
 impl FPass {
     pub fn new(uniform_view: FBufferView) -> Self {
-        const NONE_VIEW: Option<FTextureView> = None;
         Self {
-            uniform_view: uniform_view,
+            uniform_view,
             color_attachments: vec![],
             depth_stencil_attachment: None,
         }
@@ -671,9 +670,9 @@ impl FMesh {
         index_count: u64,
     ) -> Self {
         Self {
-            vertex_buffer_view: vertex_buffer_view,
-            index_buffer_view: index_buffer_view,
-            index_count: index_count,
+            vertex_buffer_view,
+            index_buffer_view,
+            index_count,
         }
     }
 
@@ -770,7 +769,7 @@ impl FMaterial {
             hoo_engine: HooEngineWeak::from(h.clone()),
             shader_code: shader,
             shader_module: HashMap::new(),
-            uniform_view: uniform_view,
+            uniform_view,
         }
     }
 
@@ -779,7 +778,7 @@ impl FMaterial {
             .unwrap()
             .is_match(name));
 
-        return Ok(());
+        Ok(())
     }
 
     // TODO: variant 是个形容词
@@ -799,7 +798,7 @@ impl FMaterial {
             .borrow_mut()
             .set_fragment_stage_entry("fsMain_".to_owned() + &name);
         self.shader_module.insert(name, shader_module);
-        return self;
+        self
     }
 
     pub fn update_uniform<T>(&mut self, data: &T) {
@@ -838,10 +837,10 @@ pub struct FModel {
 }
 
 impl FModel {
-    pub fn new(h: HooEngineRef, mesh: RcMut<FMesh>, material: RcMut<FMaterial>) -> Self {
+    pub fn new(_h: HooEngineRef, mesh: RcMut<FMesh>, material: RcMut<FMaterial>) -> Self {
         Self {
-            mesh: mesh,
-            material: material,
+            mesh,
+            material,
         }
     }
 
@@ -876,8 +875,8 @@ impl FRenderObject {
         let uniform_view = FBufferView::new_uniform(uniform_buffer);
 
         let mut out = Self {
-            model: model,
-            uniform_view: uniform_view,
+            model,
+            uniform_view,
             transform_m: glm::identity(),
             transform_v: glm::identity(),
             transform_p: glm::identity(),
@@ -940,16 +939,16 @@ bitflags! {
     }
 }
 
-impl Into<wgpu::TextureUsages> for BTextureUsages {
-    fn into(self) -> wgpu::TextureUsages {
+impl From<BTextureUsages> for wgpu::TextureUsages {
+    fn from(val: BTextureUsages) -> Self {
         let mut res = wgpu::TextureUsages::empty();
-        if self.contains(BTextureUsages::Attachment) {
+        if val.contains(BTextureUsages::Attachment) {
             res |= wgpu::TextureUsages::RENDER_ATTACHMENT;
         }
-        if self.contains(BTextureUsages::Sampled) {
+        if val.contains(BTextureUsages::Sampled) {
             res |= wgpu::TextureUsages::TEXTURE_BINDING;
         }
-        if self.contains(BTextureUsages::UnorderedAccess) {
+        if val.contains(BTextureUsages::UnorderedAccess) {
             res |= wgpu::TextureUsages::STORAGE_BINDING;
         }
         res
@@ -975,8 +974,8 @@ impl FTexture {
         let _ = Into::<wgpu::TextureFormat>::into(format);
 
         Self {
-            usages: usages,
-            format: format,
+            usages,
+            format,
             width: 1,
             height: 1,
             device_texture: None,
@@ -1161,7 +1160,7 @@ impl FTextureView {
             array_layer_count: None,
         };
 
-        return device_texture.create_view(&desc);
+        device_texture.create_view(&desc)
     }
 
     pub fn get_device_texture_view(&self, encoder: &FDeviceEncoder) -> wgpu::TextureView {

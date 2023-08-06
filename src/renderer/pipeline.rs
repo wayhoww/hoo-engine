@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 
 use crate::{
-    bundle, editor::importer::load_gltf_from_slice, hoo_log, rcmut, utils::*, HooEngineRef,
+    bundle, editor::importer::load_gltf_from_slice, rcmut, utils::*, HooEngineRef,
     HooEngineWeak,
 };
 
@@ -34,37 +34,6 @@ pub struct FGraphicsPipeline {
 
     count: u64,
 }
-
-enum FGPUResourceWrapper {
-    Buffer(wgpu::Buffer),
-    Texture(wgpu::Texture),
-    ShaderModule(wgpu::ShaderModule),
-}
-
-impl FGPUResourceWrapper {
-    fn buffer(&self) -> &wgpu::Buffer {
-        match self {
-            FGPUResourceWrapper::Buffer(b) => b,
-            _ => panic!(""),
-        }
-    }
-
-    fn texture(&self) -> &wgpu::Texture {
-        match self {
-            FGPUResourceWrapper::Texture(t) => t,
-            _ => panic!(""),
-        }
-    }
-
-    fn shader_module(&self) -> &wgpu::ShaderModule {
-        match self {
-            FGPUResourceWrapper::ShaderModule(s) => s,
-            _ => panic!(""),
-        }
-    }
-}
-
-struct FGPUResourceHandle {}
 
 impl FGraphicsPipeline {
     pub async fn new_async<'a>(h: HooEngineRef<'a>, encoder: &FDeviceEncoder) -> Self {
@@ -171,7 +140,7 @@ fn fsMain_depthOnly(vertex_out: VertexOut) -> FragmentOut {
         ));
 
         // model
-        let model = FModel::new(&h, mesh, material.clone());
+        let model = FModel::new(h, mesh, material.clone());
         let render_object1 = FRenderObject::new(h, model.clone());
         let render_object2 = FRenderObject::new(h, model.clone());
 
@@ -254,15 +223,15 @@ fn fsMain_depthOnly(vertex_out: VertexOut) -> FragmentOut {
         encoder.set_global_uniform_buffer_view(self.uniform_view.clone());
 
         self.render_object1
-            .set_transform_model(mat_model.clone())
-            .set_transform_view(mat_view.clone())
-            .set_transform_projection(mat_proj.clone())
+            .set_transform_model(mat_model)
+            .set_transform_view(mat_view)
+            .set_transform_projection(mat_proj)
             .update_uniform_buffer();
 
         self.render_object2
-            .set_transform_model(mat_model_biased.clone())
-            .set_transform_view(mat_view.clone())
-            .set_transform_projection(mat_proj.clone())
+            .set_transform_model(mat_model_biased)
+            .set_transform_view(mat_view)
+            .set_transform_projection(mat_proj)
             .update_uniform_buffer();
 
         encoder.encode_frame(|frame_encoder| {

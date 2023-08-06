@@ -33,12 +33,12 @@ impl RSubMesh {
         // check!(
         //     derivable!(self.uv0.is_some() => self.positions.len() == self.uv0.as_ref().unwrap().len())
         // );
-        check!(self.positions.len() > 0);
+        check!(!self.positions.is_empty());
         check!(self.positions.len() == self.normals.len());
         check!(self.positions.len() == self.uv0.len());
 
         check!(self.indices.len() % 3 == 0);
-        check!(self.indices.len() > 0);
+        check!(!self.indices.is_empty());
         Ok(())
     }
 }

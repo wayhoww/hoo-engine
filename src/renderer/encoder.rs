@@ -1,11 +1,8 @@
-use std::{
-    cell::{Ref, RefMut, RefCell},
-    num::NonZeroU64,
-};
+use std::cell::{Ref, RefCell};
 
-use crate::{renderer::resource::FClearValue, utils::types::RcMut, HooEngineRef, HooEngineWeak};
+use crate::{utils::types::RcMut, HooEngineRef, HooEngineWeak};
 
-use super::resource::{FBufferView, FDrawCommand, FPass, FShaderModule, FTexture, TGPUResource, EValueFormat};
+use super::resource::{FBufferView, FDrawCommand, FPass, FShaderModule, TGPUResource, EValueFormat};
 
 use strum::*;
 use strum_macros::*;
@@ -50,8 +47,8 @@ impl FPipeline {
             ],
         };
 
-        let mut vertex_state = wgpu::VertexState {
-            module: &shader_module,
+        let vertex_state = wgpu::VertexState {
+            module: shader_module,
             entry_point: logical_shader_module.get_vertex_stage_entry().unwrap(),
             buffers: &[vertex_buffer_layout], // TODO: SOA
         };
@@ -59,7 +56,7 @@ impl FPipeline {
         let color_attachments: Vec<_> = pass_encoder
             .pass
             .get_color_attachments()
-            .into_iter()
+            .iter()
             .map(|view| {
                 let attachment = wgpu::ColorTargetState {
                     format: view.texture_view.get_format(pass_encoder.encoder).into(),
@@ -71,7 +68,7 @@ impl FPipeline {
             .collect();
 
         let fragment_state = wgpu::FragmentState {
-            module: &shader_module,
+            module: shader_module,
             entry_point: logical_shader_module.get_fragment_stage_entry().unwrap(),
             targets: &color_attachments,
         };
@@ -82,7 +79,7 @@ impl FPipeline {
             .iter()
             .map(|view| {
                 let texref = view.texture_view.get_texture();
-                let tex = texref.borrow();
+                let _tex = texref.borrow();
 
                 wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth24PlusStencil8,
@@ -271,13 +268,13 @@ impl FDeviceEncoder {
 
         Self {
             hoo_engine: h.clone(),
-            device: device,
-            queue: queue,
-            surface: surface,
+            device,
+            queue,
+            surface,
             swapchain_size: (size.width, size.height),
             swapchain_texture: RefCell::new(Some(surface_texture)),
             swapchain_format: EValueFormat::from(surface_format),
-            bind_group_layouts: bind_group_layouts,
+            bind_group_layouts,
             uniform_buffer_view_global: None,
             uniform_buffer_view_task: None,
         }
@@ -299,7 +296,7 @@ impl FDeviceEncoder {
     fn make_bind_group_layouts(device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
         let mut bind_group_layout_entries = vec![];
         for i in 0..EUniformBufferType::COUNT {
-            let mut entry = wgpu::BindGroupLayoutEntry {
+            let entry = wgpu::BindGroupLayoutEntry {
                 binding: i as u32,
                 visibility: wgpu::ShaderStages::VERTEX
                     | wgpu::ShaderStages::FRAGMENT
@@ -321,7 +318,7 @@ impl FDeviceEncoder {
 
         let out = device.create_bind_group_layout(&desc);
 
-        return vec![out];
+        vec![out]
     }
 
     pub fn set_global_uniform_buffer_view(&mut self, buffer: FBufferView) {
@@ -352,7 +349,7 @@ impl FDeviceEncoder {
         let command_encoder = {
             let mut frame_encoder = FFrameEncoder {
                 encoder: self,
-                command_encoder: command_encoder,
+                command_encoder,
                 resources: &res_ref,
             };
 
@@ -378,8 +375,8 @@ impl FFrameEncoder<'_, '_, '_> {
     ) {
         let color_attachments_views: Vec<_> = render_pass
             .get_color_attachments()
-            .into_iter()
-            .map(|x| x.texture_view.get_device_texture_view(&self.encoder))
+            .iter()
+            .map(|x| x.texture_view.get_device_texture_view(self.encoder))
             .collect();
 
         let color_attachments: Vec<_> = render_pass
@@ -388,7 +385,7 @@ impl FFrameEncoder<'_, '_, '_> {
             .zip(color_attachments_views.iter())
             .map(|(x, y)| {
                 let z = wgpu::RenderPassColorAttachment {
-                    view: &y,
+                    view: y,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: x.load_op.to_wgpu_color(&x.clear_value),
@@ -402,14 +399,14 @@ impl FFrameEncoder<'_, '_, '_> {
         let depth_attachment_view = render_pass
             .get_depth_stencil_attachment()
             .as_ref()
-            .map(|x| x.texture_view.get_device_texture_view(&self.encoder));
+            .map(|x| x.texture_view.get_device_texture_view(self.encoder));
 
         let depth_attachment = render_pass
             .get_depth_stencil_attachment()
             .iter()
             .zip(depth_attachment_view.iter())
             .map(|(dsv, view)| wgpu::RenderPassDepthStencilAttachment {
-                view: &view,
+                view,
                 depth_ops: Some(wgpu::Operations {
                     load: dsv.load_op.to_wgpu_value(dsv.clear_value.clone()),
                     store: dsv.store_op.store(),
@@ -435,7 +432,7 @@ impl FFrameEncoder<'_, '_, '_> {
         let mut pass_encoder = FPassEncoder {
             pass: render_pass,
             resources: self.resources,
-            encoder: &self.encoder,
+            encoder: self.encoder,
             render_pass: pass,
 
             render_pipeline_cache: &render_pipeline_cache,

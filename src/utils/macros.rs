@@ -42,13 +42,6 @@ macro_rules! rcmut {
 }
 
 #[macro_export]
-macro_rules! hoo_log {
-    ($($arg:tt)*) => {{
-        &println!($($arg)*);
-    }};
-}
-
-#[macro_export]
 macro_rules! wait_sync {
     ($e: expr) => {
         futures::executor::block_on($e)

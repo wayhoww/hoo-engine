@@ -1,17 +1,13 @@
 use global::resources::FGlobalResources;
-use renderer::resource::FModel;
+
 use std::{
     cell::{Ref, RefCell, RefMut},
     mem::MaybeUninit,
-    panic,
     rc::Rc,
 };
 // use wasm_bindgen::prelude::*;
 
-use crate::{
-    editor::importer::load_gltf_from_slice,
-    renderer::{renderer::Renderer, resource::TRenderObject},
-};
+use crate::renderer::renderer::Renderer;
 
 mod bundle;
 mod editor;
@@ -60,7 +56,7 @@ impl HooEngine {
             .initialize_test_resources()
             .await;
 
-        return out_ref;
+        out_ref
     }
 
     pub fn next_frame(&self) {
