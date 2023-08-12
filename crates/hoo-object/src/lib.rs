@@ -1,5 +1,6 @@
-use std::{any::Any, cell::RefCell, hash::Hash, ops::Deref, os::raw::c_void, rc::Rc};
+mod tests;
 
+use std::{any::Any, cell::RefCell, hash::Hash, ops::Deref, os::raw::c_void, rc::Rc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ObjectId {
@@ -22,7 +23,7 @@ pub struct RcObject<T: 'static + Sized + Any> {
     inner: Rc<RefCell<T>>,
 }
 
-impl<T: 'static + Sized + Any> Clone for RcObject<T>{
+impl<T: 'static + Sized + Any> Clone for RcObject<T> {
     fn clone(&self) -> Self {
         Self {
             // id: self.id,
@@ -72,7 +73,9 @@ impl<T> RcObject<T> {
     }
 
     pub fn id(&self) -> ObjectId {
-        ObjectId { id: Rc::as_ptr(&self.inner) as usize }
+        ObjectId {
+            id: Rc::as_ptr(&self.inner) as usize,
+        }
     }
 }
 
@@ -99,7 +102,9 @@ impl<T: ?Sized> RcTrait<T> {
     }
 
     pub fn id(&self) -> ObjectId {
-        ObjectId { id: Rc::as_ptr(&self.inner) as *const c_void as usize }
+        ObjectId {
+            id: Rc::as_ptr(&self.inner) as *const c_void as usize,
+        }
     }
 }
 

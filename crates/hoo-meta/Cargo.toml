@@ -11,3 +11,8 @@ v8 = "0.75.0"
 
 [dependencies.hoo-object]
 path = "../hoo-object"
+
+[dependencies.hoo-meta-macros]
+path = "../hoo-meta-macros"
+
+

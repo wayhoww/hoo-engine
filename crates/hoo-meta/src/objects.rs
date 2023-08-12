@@ -37,7 +37,36 @@ pub fn unregister_object(id: ObjectId) {
     });
 }
 
-impl<T: InitializeProperties> GetJsValue for RcObject<T> {
+pub fn register_object_enabling_bigc(
+    scope: &mut v8::HandleScope<'_>,
+    rs_obj: RcAny,
+    js_obj: v8::Local<v8::Object>,
+) {
+    let id = rs_obj.id();
+    let rc = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let weak = v8::Weak::with_guaranteed_finalizer(
+        scope,
+        js_obj,
+        Box::new({
+            let rc = rc.clone();
+            move || {
+                // 有一个不知道什么语言特性：这边变量名命名为 _ 的话，rc 依然会被销毁
+                #[allow(unused_variables)]
+                let moved_rc = rc; // 让 rc 存续
+                unregister_object(id);
+            }
+        }),
+    );
+    rc.replace(Some(weak.clone()));
+
+    register_object(rs_obj, weak);
+    js_obj.set_internal_field(
+        0,
+        v8::External::new(scope, id.to_ptr() as *mut std::os::raw::c_void).into(),
+    );
+}
+
+impl<T: BindProperties> GetJsValue for RcObject<T> {
     // into 这个名字也不好
     fn get_js_value<'a>(
         &self,
@@ -60,23 +89,8 @@ impl<T: InitializeProperties> GetJsValue for RcObject<T> {
         } else {
             // Rust 对象还在，且下面的代码大概率不会失败
             // 因此不用清理 weak 指针
-
-            let object = T::initialize_properties(scope);
-            object.set_internal_field(0, v8::External::new(scope, self.id().to_ptr() as *mut c_void).into());
-
-            // 这边是从既有 Rust 对象创建 Js 对象
-            // TODO: GC 互通
-            ID2RES.with(|map| {
-                let mut map = map.borrow_mut();
-                map.insert(
-                    self.id(),
-                    (
-                        self.clone().into_any(),
-                        v8::Weak::new(scope, object),
-                    ),
-                );
-            });
-
+            let object = T::bind_properties(scope);
+            register_object_enabling_bigc(scope, self.clone().into_any(), object);
             Ok(object.into())
         }
     }

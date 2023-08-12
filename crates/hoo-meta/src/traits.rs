@@ -26,10 +26,8 @@ pub trait GetJsValue {
     ) -> Result<v8::Local<'a, v8::Value>, JsException>;
 }
 
-pub trait InitializeProperties {
-    fn initialize_properties<'a>(
-        scope: &mut v8::HandleScope<'a>,
-    ) -> v8::Local<'a, v8::Object>;
+pub trait BindProperties {
+    fn bind_properties<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Object>;
 }
 
 // 填充 JsObject

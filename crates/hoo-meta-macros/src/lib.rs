@@ -18,6 +18,12 @@ macro_rules! js_function_format_string {
     };
 }
 
+macro_rules! js_function_name_format_string {
+    () => {
+        "__hoo_meta_js_function_name_{}"
+    };
+}
+
 #[proc_macro_attribute]
 pub fn js_impl(
     _attr: proc_macro::TokenStream,
@@ -123,15 +129,7 @@ pub fn js_impl(
                     scope: &mut v8::HandleScope,
                     object: v8::Local<v8::Object>,
                 ) {
-                    /*
-                    fn __hoo_meta_js_function_new < 'a, 's, 'b > (
-                        scope : & 'a mut v8 :: HandleScope < 's >,
-                        args : v8 :: FunctionCallbackArguments < 's >,
-                    ) -> Result < Self, hoo_meta :: TryFromJsValueError >
-                    */
                     #(#method_bindings)*
-
-                    // println!("__hoo_meta_set_trait_methods called");
                 }
             }
 
@@ -144,29 +142,38 @@ pub fn js_impl(
     }
 }
 
-#[proc_macro_attribute]
-pub fn js_struct(
-    _attr: proc_macro::TokenStream,
+#[proc_macro_derive(JsStruct)]
+pub fn js_struct_fn(
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let item2: proc_macro2::TokenStream = item.clone().into();
     let syn_item = syn::parse2::<syn::Item>(item2.clone()).unwrap();
-
-    // 直接添加一个字段有诸多坏处：
-    // 需要影响 new 的过程
-    // enum 和 unamed field 不好处理
     if let syn::Item::Struct(syn_struct) = syn_item {
         let mut out = quote!();
-        out.append_all(item2);
         out.append_all(get_item_struct_converter(&syn_struct));
-        out.append_all(get_getters_setters(&syn_struct));
+        out.append_all(get_getters_setters_ctor(&syn_struct));
         out.into()
     } else {
         panic!("js_struct attribute can only be applied to structs");
     }
 }
 
-fn get_getters_setters(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
+#[proc_macro_derive(JsStructNoConstructor)]
+pub fn js_struct_no_constructor_fn(
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let item2: proc_macro2::TokenStream = item.clone().into();
+    let syn_item = syn::parse2::<syn::Item>(item2.clone()).unwrap();
+    if let syn::Item::Struct(syn_struct) = syn_item {
+        let mut out = quote!();
+        out.append_all(get_item_struct_converter(&syn_struct));
+        out.into()
+    } else {
+        panic!("js_struct attribute can only be applied to structs");
+    }
+}
+
+fn get_getters_setters_ctor(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
     let ident = &st.ident;
     let struct_name = ident.to_string();
 
@@ -204,7 +211,7 @@ fn get_getters_setters(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
                     let this = args.this();
                     // 能访问到这个 getter/setter, 说明一定是有效的
                     let rsobj_index = hoo_meta::get_external_internal_value_from_js_object(scope, &this, 0).unwrap();
-                    let rsobj = hoo_meta::get_registered_rust_object(hoo_object::ObjectId::from_ptr(rsobj_index as *const c_void)).unwrap();
+                    let rsobj = hoo_meta::get_registered_rust_object(hoo_object::ObjectId::from_ptr(rsobj_index as *const std::os::raw::c_void)).unwrap();
 
                     let rsobj = rsobj.try_downcast::<#ident>().unwrap();
                     let jsobj = hoo_meta::GetJsValue::get_js_value(&rsobj.borrow().#key_ident, scope);
@@ -231,7 +238,7 @@ fn get_getters_setters(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
                         Ok(val) => {
                             let this = args.this();
                             let rsobj_index = hoo_meta::get_external_internal_value_from_js_object(scope, &this, 0).unwrap();
-                            let rsobj = hoo_meta::get_registered_rust_object(hoo_object::ObjectId::from_ptr(rsobj_index as *const c_void)).unwrap();
+                            let rsobj = hoo_meta::get_registered_rust_object(hoo_object::ObjectId::from_ptr(rsobj_index as *const std::os::raw::c_void)).unwrap();
 
                             let rsobj = rsobj.try_downcast::<#ident>().unwrap();
                             rsobj.borrow_mut().#key_ident = val;
@@ -252,9 +259,8 @@ fn get_getters_setters(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
 
     let generated = quote!(
         impl #ident {
-            pub fn __hoo_meta_register_struct(
-                context: &mut hoo_meta::HooMetaContext,
-                context_template: v8::Local<v8::ObjectTemplate>,
+            pub fn __hoo_meta_register_struct<'s, 'a>(
+                module_builder: &mut impl hoo_meta::ModuleLikeBuilder<'s, 'a>
             ) {
                 fn new<'a, 's, 'b>(
                     scope: &'a mut v8::HandleScope<'s>,
@@ -275,28 +281,10 @@ fn get_getters_setters(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
                     retval.set(this.into());
 
                     // 构造 RcObject
-                    // let rs_stu: #ident = __hoo_meta_js_function_new_rs_point(scope, args).unwrap();
                     let rs_stu: #ident = #ident::#converter_func_ident(scope, args).unwrap();
                     let rs_obj = hoo_object::RcObject::new(rs_stu);
 
-                    let object_id = rs_obj.id();
-                    // 这边是通过构造函数创建新的对象
-                    
-                    let rc = std::rc::Rc::new(std::cell::RefCell::new(None));
-                    let weak = v8::Weak::with_guaranteed_finalizer(scope, this, Box::new({
-                                    let rc = rc.clone();
-                                    move || {
-                                        // 有一个不知道什么语言特性：这边变量名命名为 _ 的话，rc 依然会被销毁
-                                        #[allow(unused_variables)]
-                                        let moved_rc = rc; // 让 rc 存续
-                                        println!("finalizer called!, object id = {}", object_id.to_ptr() as usize);
-                                        hoo_meta::unregister_object(object_id);
-                                    }
-                    }));
-                    rc.replace(Some(weak.clone()));
-
-                    hoo_meta::register_object(rs_obj.into_any(), weak);   // TODO: GC互通
-                    this.set_internal_field(0, v8::External::new(scope, object_id.to_ptr() as *mut c_void).into());
+                    hoo_meta::register_object_enabling_bigc(scope, rs_obj.into_any(), this);
 
                     #(#getters_setters)*
 
@@ -304,14 +292,15 @@ fn get_getters_setters(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
                 };
 
                 // todo: cache?
-                let function_template = v8::FunctionTemplate::new(context.scope_mut(), new);
-                let entryname = v8::String::new(context.scope_mut(), #struct_name).unwrap();
-                context_template.set(entryname.into(), function_template.into());
+                let scope = module_builder.get_global_scope();
+                let function_template = v8::FunctionTemplate::new(scope, new);
+                let entryname = v8::String::new(scope, #struct_name).unwrap();
+                module_builder.get_template().set(entryname.into(), function_template.into());
             }
         }
 
-        impl hoo_meta::InitializeProperties for #ident {
-            fn initialize_properties<'a>(
+        impl hoo_meta::BindProperties for #ident {
+            fn bind_properties<'a>(
                 scope: &mut v8::HandleScope<'a>,
             ) -> v8::Local<'a, v8::Object> {
                 let instance_template = v8::ObjectTemplate::new(scope);
@@ -426,6 +415,27 @@ pub fn get_js_function(item: proc_macro::TokenStream) -> proc_macro::TokenStream
     }
 }
 
+
+#[proc_macro]
+pub fn get_js_function_name_string(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let iter = item.into_iter();
+    assert!(iter.clone().count() == 1);
+
+    let maybe_ident = iter.last().unwrap();
+
+    match maybe_ident {
+        proc_macro::TokenTree::Ident(ident) => {
+            let new_ident = syn::Ident::new(
+                &format!(js_function_name_format_string!(), ident),
+                proc_macro2::Span::call_site(),
+            );
+            quote!(#new_ident).into()
+        }
+        _ => unimplemented!("get_js_function only supports identifiers"),
+    }
+}
+
+
 #[proc_macro_attribute]
 pub fn js_function(
     _attr: proc_macro::TokenStream,
@@ -496,6 +506,13 @@ fn generate_js_function(syn_fn: impl FunctionType, in_impl: bool) -> proc_macro2
         &format!(js_function_format_string!(), ident),
         proc_macro2::Span::call_site(),
     );
+
+    let function_name_ident = syn::Ident::new(
+        &format!(js_function_name_format_string!(), ident),
+        proc_macro2::Span::call_site(),
+    );
+
+    let function_name_str = ident.to_string();
 
     // check: self is not exisits
     let arg_count = signature.inputs.len() as i32;
@@ -572,6 +589,9 @@ fn generate_js_function(syn_fn: impl FunctionType, in_impl: bool) -> proc_macro2
                 let result = #qualifier #ident(#(#pats),*);
                 Ok(result)
             }
+
+            
+            const #function_name_ident: &str = #function_name_str;
 
             fn #new_ident_2<'a, 's, 'b> (
                 scope: &'a mut v8::HandleScope<'s>,
