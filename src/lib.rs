@@ -2,8 +2,9 @@ mod bundle;
 mod device;
 mod editor;
 mod global;
+mod graphics;
 mod io;
-mod renderer;
+mod object;
 mod utils;
 
 use global::resources::FGlobalResources;
@@ -14,7 +15,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::renderer::Renderer;
+use crate::graphics::Renderer;
 
 pub struct HooEngine {
     // graphics

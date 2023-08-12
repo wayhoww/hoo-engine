@@ -31,5 +31,5 @@ winit = "0.28.6"
 env_logger = "0.10.0"
 log = "0.4.19"
 typed-arena = "2.0.2"
-
 wgpu = "0.17.0"  # src/device/graphics
+v8 = "0.75.0"

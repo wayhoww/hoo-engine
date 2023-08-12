@@ -61,7 +61,7 @@ impl<T: InitializeProperties> GetJsValue for RcObject<T> {
             // Rust 对象还在，且下面的代码大概率不会失败
             // 因此不用清理 weak 指针
 
-            let object = T::__hoo_meta_initialize_properties(scope);
+            let object = T::initialize_properties(scope);
             object.set_internal_field(0, v8::External::new(scope, self.id().to_ptr() as *mut c_void).into());
 
             // 这边是从既有 Rust 对象创建 Js 对象

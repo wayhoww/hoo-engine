@@ -11,7 +11,6 @@ use std::{
     os::raw::c_void,
     rc::Rc,
 };
-use uuid::{uuid, Uuid};
 
 use hoo_meta_macros::{get_js_function, js_function, js_impl, js_struct};
 // use hoo_object::{ObjectId, RcAny, RcObject, RcTrait};
@@ -78,7 +77,7 @@ impl Drop for RsPointPair {
 }
 
 // impl hoo_meta::InitializeProperties for hoo_object::RcObject<RsPoint> {
-//     fn __hoo_meta_initialize_properties<'a>(
+//     fn initialize_properties<'a>(
 //         &self,
 //         scope: &mut v8::HandleScope<'a>,
 //     ) -> v8::Local<'a, v8::Object> {

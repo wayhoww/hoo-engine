@@ -311,7 +311,7 @@ fn get_getters_setters(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
         }
 
         impl hoo_meta::InitializeProperties for #ident {
-            fn __hoo_meta_initialize_properties<'a>(
+            fn initialize_properties<'a>(
                 scope: &mut v8::HandleScope<'a>,
             ) -> v8::Local<'a, v8::Object> {
                 let instance_template = v8::ObjectTemplate::new(scope);

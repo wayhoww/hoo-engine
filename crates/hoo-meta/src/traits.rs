@@ -27,7 +27,7 @@ pub trait GetJsValue {
 }
 
 pub trait InitializeProperties {
-    fn __hoo_meta_initialize_properties<'a>(
+    fn initialize_properties<'a>(
         scope: &mut v8::HandleScope<'a>,
     ) -> v8::Local<'a, v8::Object>;
 }

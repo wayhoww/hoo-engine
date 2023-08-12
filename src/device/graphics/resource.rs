@@ -1019,7 +1019,7 @@ pub struct FVertexEntry {
 impl FVertexEntry {
     pub fn new_soa_entry(location: u32, view: FBufferView, format: EVertexFormat) -> Self {
         Self {
-            location,   
+            location,
             format,
             view,
             offset: 0,
