@@ -1,9 +1,34 @@
 use std::{any::Any, cell::RefCell, hash::Hash, ops::Deref, os::raw::c_void, rc::Rc};
 
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ObjectId {
+    id: usize,
+}
+
+impl ObjectId {
+    pub fn to_ptr(&self) -> *const c_void {
+        self.id as *const c_void
+    }
+
+    pub fn from_ptr(ptr: *const c_void) -> Self {
+        Self { id: ptr as usize }
+    }
+}
+
+#[derive(Debug)]
 pub struct RcObject<T: 'static + Sized + Any> {
     // id: ObjectId,
     inner: Rc<RefCell<T>>,
+}
+
+impl<T: 'static + Sized + Any> Clone for RcObject<T>{
+    fn clone(&self) -> Self {
+        Self {
+            // id: self.id,
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -24,6 +49,7 @@ impl Clone for RcTrait<dyn Any> {
     }
 }
 
+#[macro_export]
 macro_rules! into_trait {
     ($obj: expr) => {{
         let inner_clone = $obj.inner.clone();
@@ -31,7 +57,7 @@ macro_rules! into_trait {
     }};
 }
 
-type RcAny = RcTrait<dyn Any>;
+pub type RcAny = RcTrait<dyn Any>;
 
 impl<T> RcObject<T> {
     pub fn new(inner: T) -> Self {
@@ -41,16 +67,12 @@ impl<T> RcObject<T> {
         }
     }
 
-    // pub fn id(&self) -> ObjectId {
-    //     self.id
-    // }
-
     pub fn into_any(self) -> RcAny {
         into_trait!(self)
     }
 
-    pub fn id(&self) -> usize {
-        Rc::as_ptr(&self.inner) as usize
+    pub fn id(&self) -> ObjectId {
+        ObjectId { id: Rc::as_ptr(&self.inner) as usize }
     }
 }
 
@@ -65,10 +87,6 @@ impl<T: ?Sized> RcTrait<T> {
         }
     }
 
-    // pub fn id(&self) -> ObjectId {
-    //     self.id
-    // }
-
     pub fn try_downcast<U: 'static>(self) -> Result<RcObject<U>, Self> {
         let down_casted: Result<Rc<RefCell<U>>, _> = self.typed.downcast();
         match down_casted {
@@ -80,8 +98,8 @@ impl<T: ?Sized> RcTrait<T> {
         }
     }
 
-    pub fn id(&self) -> usize {
-        Rc::as_ptr(&self.inner) as *const c_void as usize
+    pub fn id(&self) -> ObjectId {
+        ObjectId { id: Rc::as_ptr(&self.inner) as *const c_void as usize }
     }
 }
 
