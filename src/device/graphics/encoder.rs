@@ -147,8 +147,6 @@ enum EUniformBufferType {
 }
 
 pub struct FDeviceEncoder {
-    hoo_engine: HooEngineWeak,
-
     device: wgpu::Device,
     queue: wgpu::Queue,
 
@@ -214,11 +212,11 @@ impl FDeviceEncoder {
 
     // impl
 
-    pub fn new(h: HooEngineRef, window: &winit::window::Window) -> Self {
-        futures::executor::block_on(Self::new_async(h, window))
+    pub fn new(window: &winit::window::Window) -> Self {
+        futures::executor::block_on(Self::new_async(window))
     }
 
-    pub async fn new_async<'a>(h: HooEngineRef<'a>, window: &winit::window::Window) -> Self {
+    pub async fn new_async(window: &winit::window::Window) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             dx12_shader_compiler: Default::default(),
@@ -270,7 +268,6 @@ impl FDeviceEncoder {
         let bind_group_layouts = Self::make_bind_group_layouts(&device);
 
         Self {
-            hoo_engine: h.clone(),
             device,
             queue,
             surface,
@@ -338,10 +335,7 @@ impl FDeviceEncoder {
                 label: Some("Main Command Encoder"),
             });
 
-        let res = self
-            .hoo_engine
-            .upgrade()
-            .unwrap()
+        let res = hoo_engine()
             .borrow()
             .get_resources()
             .prepare_gpu_resources(self);

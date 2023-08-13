@@ -111,10 +111,9 @@ impl FBuffer {
         }
     }
 
-    pub fn new_and_manage(h: HooEngineRef, usages: BBufferUsages) -> RcMut<Self> {
+    pub fn new_and_manage(usages: BBufferUsages) -> RcMut<Self> {
         let res = rcmut!(Self::new(usages));
-        h.upgrade()
-            .unwrap()
+        hoo_engine()
             .borrow()
             .get_resources()
             .add_gpu_resource(res.clone());
@@ -244,10 +243,9 @@ impl FShaderModule {
         }
     }
 
-    pub fn new_and_manage(h: HooEngineRef, code: String) -> RcMut<Self> {
+    pub fn new_and_manage(code: String) -> RcMut<Self> {
         let res = rcmut!(Self::new(code));
-        h.upgrade()
-            .unwrap()
+        hoo_engine()
             .borrow()
             .get_resources()
             .add_gpu_resource(res.clone());
@@ -327,7 +325,7 @@ pub struct FTexture {
 }
 
 impl FTexture {
-    fn new_internal(_: HooEngineRef, format: ETextureFormat, usages: BTextureUsages) -> Self {
+    fn new_internal(format: ETextureFormat, usages: BTextureUsages) -> Self {
         #[cfg(debug_assertions)]
         let _ = Into::<wgpu::TextureFormat>::into(format);
 
@@ -342,14 +340,9 @@ impl FTexture {
         }
     }
 
-    pub fn new_and_manage(
-        h: HooEngineRef,
-        format: ETextureFormat,
-        usages: BTextureUsages,
-    ) -> RcMut<Self> {
-        let res = rcmut!(Self::new_internal(h, format, usages));
-        h.upgrade()
-            .unwrap()
+    pub fn new_and_manage(format: ETextureFormat, usages: BTextureUsages) -> RcMut<Self> {
+        let res = rcmut!(Self::new_internal(format, usages));
+        hoo_engine()
             .borrow()
             .get_resources()
             .add_gpu_resource(res.clone());
@@ -1059,10 +1052,7 @@ impl FMesh {
         self.index_count
     }
 
-    fn make_buffer_from_slice<const R: usize>(
-        h: HooEngineRef,
-        slice: &[glm::TVec<f32, R>],
-    ) -> RcMut<FBuffer> {
+    fn make_buffer_from_slice<const R: usize>(slice: &[glm::TVec<f32, R>]) -> RcMut<FBuffer> {
         let mut vec: Vec<f32> = Vec::new();
         for v in slice.iter() {
             for i in 0..R {
@@ -1070,7 +1060,7 @@ impl FMesh {
             }
         }
 
-        let buffer = FBuffer::new_and_manage(h, BBufferUsages::Vertex);
+        let buffer = FBuffer::new_and_manage(BBufferUsages::Vertex);
 
         {
             let mut buffer_ref = buffer.borrow_mut();
@@ -1080,10 +1070,10 @@ impl FMesh {
         buffer
     }
 
-    pub fn from_file_resource(h: HooEngineRef, sub_mesh: &RSubMesh) -> Self {
-        let vertex_position = Self::make_buffer_from_slice(h, &sub_mesh.positions);
-        let vertex_normal = Self::make_buffer_from_slice(h, &sub_mesh.normals);
-        let vertex_uv0 = Self::make_buffer_from_slice(h, &sub_mesh.uv0);
+    pub fn from_file_resource(sub_mesh: &RSubMesh) -> Self {
+        let vertex_position = Self::make_buffer_from_slice(&sub_mesh.positions);
+        let vertex_normal = Self::make_buffer_from_slice(&sub_mesh.normals);
+        let vertex_uv0 = Self::make_buffer_from_slice(&sub_mesh.uv0);
 
         let vertex_position_size = vertex_position.borrow().size() as u64;
         let vertex_normal_size = vertex_normal.borrow().size() as u64;
@@ -1103,7 +1093,7 @@ impl FMesh {
         );
         let view_uv0 = FBufferView::new(vertex_uv0, 0, vertex_uv0_size, EBufferViewType::Vertex);
 
-        let index_buffer = FBuffer::new_and_manage(h, BBufferUsages::Index);
+        let index_buffer = FBuffer::new_and_manage(BBufferUsages::Index);
         let index_buffer_size = sub_mesh.indices.len() * 4;
         index_buffer.borrow_mut().update_by_array(&sub_mesh.indices);
         let index_buffer_view = FBufferView::new(
@@ -1125,8 +1115,6 @@ impl FMesh {
 
 // 暂时不搞 shader 变种，所以也没有 MaterialInstance
 pub struct FMaterial {
-    hoo_engine: HooEngineWeak,
-
     shader_code: String,
     shader_module: HashMap<String, RcMut<FShaderModule>>,
     uniform_view: FBufferView,
@@ -1139,15 +1127,14 @@ impl FMaterial {
     }
 
     // impl
-    pub fn new(h: HooEngineRef, shader: String) -> Self {
+    pub fn new(shader: String) -> Self {
         // todo: reflection
-        let buffer = FBuffer::new_and_manage(h, BBufferUsages::Uniform);
+        let buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
         let buffer_size = 16u64;
         buffer.borrow_mut().resize(buffer_size);
         let uniform_view = FBufferView::new(buffer, 0, buffer_size, EBufferViewType::Uniform);
 
         Self {
-            hoo_engine: HooEngineWeak::from(h.clone()),
             shader_code: shader,
             shader_module: HashMap::new(),
             uniform_view,
@@ -1169,8 +1156,7 @@ impl FMaterial {
 
         debug_only!(self.check_shader_profile_name(&name).unwrap());
 
-        let shader_module =
-            FShaderModule::new_and_manage(&self.hoo_engine, self.shader_code.clone());
+        let shader_module = FShaderModule::new_and_manage(self.shader_code.clone());
         shader_module
             .borrow_mut()
             .set_vertex_stage_entry("vsMain_".to_owned() + &name);
@@ -1217,7 +1203,7 @@ pub struct FModel {
 }
 
 impl FModel {
-    pub fn new(_h: HooEngineRef, mesh: RcMut<FMesh>, material: RcMut<FMaterial>) -> Self {
+    pub fn new(mesh: RcMut<FMesh>, material: RcMut<FMaterial>) -> Self {
         Self { mesh, material }
     }
 
@@ -1240,8 +1226,8 @@ pub struct FRenderObject {
 }
 
 impl FRenderObject {
-    pub fn new(h: HooEngineRef, model: FModel) -> Self {
-        let uniform_buffer = FBuffer::new_and_manage(h, BBufferUsages::Uniform);
+    pub fn new(model: FModel) -> Self {
+        let uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
 
         let uniform_struct = DrawCallUniform::default();
         {

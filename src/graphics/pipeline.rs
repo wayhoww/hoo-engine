@@ -6,8 +6,6 @@ use crate::*;
 use nalgebra_glm as glm;
 
 pub struct FGraphicsPipeline {
-    hoo_engine: HooEngineWeak,
-
     pass1: FPass,
     pass2: FPass,
 
@@ -22,7 +20,7 @@ pub struct FGraphicsPipeline {
 }
 
 impl FGraphicsPipeline {
-    pub async fn new_async<'a>(h: HooEngineRef<'a>, encoder: &FDeviceEncoder) -> Self {
+    pub async fn new_async<'a>(encoder: &FDeviceEncoder) -> Self {
         // material
         // let shader_code = "".to_string(); // get_text_from_url("/resources/main.wgsl").await.unwrap();
         let shader_code = r#"
@@ -85,7 +83,7 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
     return fragment_out;
 }
         "#;
-        let material = rcmut!(FMaterial::new(h, shader_code.into()));
+        let material = rcmut!(FMaterial::new(shader_code.into()));
         material.borrow_mut().enable_shader_profile("base".into());
         material
             .borrow_mut()
@@ -95,23 +93,21 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
         let load_result = load_gltf_from_slice(bundle::gltf_cube());
 
         let mesh = rcmut!(FMesh::from_file_resource(
-            h,
             &load_result.unwrap()[0].sub_meshes[0]
         ));
 
         // model
-        let model = FModel::new(h, mesh, material.clone());
-        let render_object1 = FRenderObject::new(h, model.clone());
-        let render_object2 = FRenderObject::new(h, model.clone());
+        let model = FModel::new(mesh, material.clone());
+        let render_object1 = FRenderObject::new(model.clone());
+        let render_object2 = FRenderObject::new(model.clone());
 
         // faked
-        let default_uniform_buffer = FBuffer::new_and_manage(h, BBufferUsages::Uniform);
+        let default_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
         default_uniform_buffer.borrow_mut().resize(1024);
         let uniform_view = FBufferView::new_uniform(default_uniform_buffer.clone());
 
         // pass
         let depth_texture = FTexture::new_and_manage(
-            h,
             ETextureFormat::Depth24PlusStencil8,
             BTextureUsages::Attachment,
         );
@@ -136,7 +132,6 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
         });
 
         Self {
-            hoo_engine: h.clone(),
             pass1,
             pass2,
             uniform_buffer: default_uniform_buffer,

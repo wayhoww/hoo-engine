@@ -1,3 +1,1 @@
-struct HStaticModelComponent {
-
-}
+struct HStaticModelComponent {}

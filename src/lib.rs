@@ -23,36 +23,30 @@ pub struct HooEngine {
     resources: RefCell<FGlobalResources>,
 }
 
-// 为啥要套一个 Rc? 有些地方可能要存储
-// 为啥要套一个 &? 减少拷贝
-// 暂时不考虑多线程
-type HooEngineRef<'a> = &'a std::rc::Weak<RefCell<HooEngine>>;
-type HooEngineWeak = std::rc::Weak<RefCell<HooEngine>>;
+thread_local! {
+    static HOO_ENGINE: RefCell<Option<Rc<RefCell<HooEngine>>>> = RefCell::new(None);
+}
+
+pub fn hoo_engine() -> Rc<RefCell<HooEngine>> {
+    HOO_ENGINE.with(|e| e.borrow().as_ref().unwrap().clone())
+}
+
+pub fn initialize_hoo_engine(engine: Rc<RefCell<HooEngine>>) {
+    HOO_ENGINE.with(|e| {
+        assert!(e.borrow().is_none());
+        *e.borrow_mut() = Some(engine);
+    });
+}
 
 impl HooEngine {
     pub async fn new_async(window: &winit::window::Window) -> Rc<RefCell<HooEngine>> {
         let out = HooEngine {
             // assume: do not access HooEngine::renderer in init of Renderer
             #[allow(invalid_value)]
-            renderer: RefCell::new(unsafe { MaybeUninit::uninit().assume_init() }),
+            renderer: RefCell::new(Renderer::new_async(window).await),
             resources: RefCell::new(FGlobalResources::new()),
         };
-        let out_ref = rcmut!(out);
-        let renderer = Renderer::new_async(&Rc::downgrade(&out_ref), window).await;
-
-        unsafe {
-            std::ptr::copy_nonoverlapping(&renderer, out_ref.borrow_mut().renderer.as_ptr(), 1)
-        }
-
-        std::mem::forget(renderer);
-
-        out_ref
-            .borrow()
-            .get_renderer_mut()
-            .initialize_test_resources()
-            .await;
-
-        out_ref
+        rcmut!(out)
     }
 
     pub fn next_frame(&self) {

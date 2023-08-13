@@ -1,3 +1,9 @@
+use std::{
+    cell::{Ref, RefCell},
+    ops::Deref,
+    rc::Rc,
+};
+
 use hoo_engine::*;
 
 use winit::{
@@ -14,6 +20,15 @@ pub fn run() {
 
     let hoo_engine = HooEngine::new_async(&window);
     let hoo_engine = futures::executor::block_on(hoo_engine);
+
+    initialize_hoo_engine(hoo_engine.clone());
+
+    {
+        let hoo_engine_ref = hoo_engine.borrow();
+        let mut renderer_ref = hoo_engine_ref.get_renderer_mut();
+        let init_future = renderer_ref.initialize_test_resources();
+        futures::executor::block_on(init_future);
+    }
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::RedrawRequested(_) => {

@@ -1,7 +1,3 @@
-struct HGraphicsSystem {
+struct HGraphicsSystem {}
 
-}
-
-impl super::traits::TSystem for HGraphicsSystem {
-    
-}
+impl super::traits::TSystem for HGraphicsSystem {}
