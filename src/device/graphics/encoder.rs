@@ -220,7 +220,7 @@ impl FDeviceEncoder {
 
     pub async fn new_async<'a>(h: HooEngineRef<'a>, window: &winit::window::Window) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::DX12,
+            backends: wgpu::Backends::all(),
             dx12_shader_compiler: Default::default(),
         });
 
