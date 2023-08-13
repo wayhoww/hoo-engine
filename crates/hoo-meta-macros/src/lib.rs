@@ -326,6 +326,18 @@ fn get_item_struct_converter(st: &syn::ItemStruct) -> proc_macro2::TokenStream {
 
     let mut fields: Vec<(syn::Ident, syn::Type)> = vec![];
 
+    let has_private_field = st.fields.iter().find(|x| {
+        if let syn::Visibility::Public(_) = x.vis {
+            false
+        } else {
+            true
+        }
+    }).is_some();
+
+    if has_private_field {
+        return quote!();
+    }
+    
     for field in &st.fields {
         if let Some(field_ident) = &field.ident {
             let field_type = field.ty.clone();

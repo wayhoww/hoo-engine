@@ -1,3 +1,4 @@
+pub mod exports;
 mod tests;
 
 use std::{any::Any, cell::RefCell, hash::Hash, ops::Deref, os::raw::c_void, rc::Rc};

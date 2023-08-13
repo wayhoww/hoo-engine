@@ -6,6 +6,7 @@ mod tests {
     use crate as hoo_meta;
     use crate::*;
     use hoo_meta_macros::*;
+    use hoo_object::exports::*;
     use hoo_object::RcObject;
 
     fn initialize() {
@@ -153,6 +154,106 @@ mod tests {
             hoo_meta_context.evaluate_script_get_string(
                 "let p = new Pair(1, 2); let dp = new PairPair(p, p); dp.x.x = 3; dp.y.x"
             ),
+            "3"
+        );
+    }
+
+    #[test]
+    fn fields_and_methods() {
+        initialize();
+
+        #[derive(JsStruct)]
+        struct Pair {
+            pub x: i32,
+            pub y: i32,
+        }
+
+        #[js_impl]
+        impl Pair {
+            // new 是一个例外：写的是返回值类型，其实返回引用类型
+            pub fn new(x: i32, y: i32) -> Self {
+                Self { x, y }
+            }
+
+            pub fn sum(&self) -> i32 {
+                self.x + self.y
+            }
+        }
+
+        // 函数返回值类型
+        #[js_function]
+        fn new_pair(x: i32, y: i32) -> Pair {
+            return Pair::new(x, y);
+        }
+
+        let isolate = &mut v8::Isolate::new(v8::CreateParams::default());
+        let mut global_scope = v8::HandleScope::new(isolate);
+
+        let mut hoo_meta_context = build_context(&mut global_scope, |context_builder| {
+            module_add_class!(context_builder, Pair);
+            module_add_function!(context_builder, new_pair);
+        });
+
+        assert_eq!(
+            hoo_meta_context.evaluate_script_get_string("new Pair(1, 2).sum()"),
+            "3"
+        );
+
+        assert!(hoo_meta_context
+            .evaluate_script("new_pair(1, 2).sum()")
+            .is_none());
+    }
+
+    #[test]
+    fn auto_conversion() {
+        initialize();
+
+        #[derive(JsStruct)]
+        struct Pair {
+            pub x: i32,
+            pub y: i32,
+        }
+
+        #[js_impl]
+        impl Pair {
+            pub fn new(x: i32, y: i32) -> Self {
+                Self { x, y }
+            }
+        }
+
+        #[js_function]
+        fn sum(val: Pair) -> i32 {
+            return val.x + val.y;
+        }
+
+        #[js_function]
+        fn sum_ref(val: RcObject<Pair>) -> i32 {
+            let val = val.borrow();
+            return val.x + val.y;
+        }
+
+        let isolate = &mut v8::Isolate::new(v8::CreateParams::default());
+        let mut global_scope = v8::HandleScope::new(isolate);
+
+        let mut hoo_meta_context = build_context(&mut global_scope, |context_builder| {
+            module_add_class!(context_builder, Pair);
+            module_add_function!(context_builder, sum);
+            module_add_function!(context_builder, sum_ref);
+        });
+
+        assert_eq!(
+            hoo_meta_context.evaluate_script_get_string("sum({x: 1, y: 2})"),
+            "3"
+        );
+        assert_eq!(
+            hoo_meta_context.evaluate_script_get_string("sum(new Pair(1, 2))"),
+            "3"
+        );
+        assert!(hoo_meta_context
+            .evaluate_script("sum_ref({x: 1, y: 2})")
+            .is_none());
+        assert_eq!(
+            hoo_meta_context.evaluate_script_get_string("sum_ref(new Pair(1, 2))"),
             "3"
         );
     }

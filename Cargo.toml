@@ -33,3 +33,13 @@ log = "0.4.19"
 typed-arena = "2.0.2"
 wgpu = "0.17.0"  # src/device/graphics
 v8 = "0.75.0"
+
+[dependencies.hoo-object]
+path = "./crates/hoo-object"
+
+[dependencies.hoo-meta]
+path = "./crates/hoo-meta"
+
+[dependencies.hoo-meta-macros]
+path = "./crates/hoo-meta-macros"
+
