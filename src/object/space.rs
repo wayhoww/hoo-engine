@@ -1,10 +1,10 @@
-use hoo_object::{RcObject, RcTrait};
+use hoo_object::{RcAny, RcObject, RcTrait};
 
-use super::{entity::HEntity, systems::TSystem, components::TComponent};
+use super::{entity::HEntity, systems::TSystem};
 
 pub struct HSpace {
     pub entities: Vec<HEntity>,
-    pub systems: Vec<RcTrait<dyn TSystem>>
+    pub systems: Vec<RcTrait<dyn TSystem>>,
 }
 
 impl HSpace {
@@ -18,14 +18,14 @@ impl HSpace {
     pub fn tick(&mut self, delta_time: f64) {
         for system in self.systems.iter() {
             for entity in self.entities.iter() {
-                let mut components: Vec<RcTrait<dyn TComponent>> = Vec::new();
-                for component in entity.components.iter() {
-                    if system.borrow().get_interest_components().contains(&component.borrow().component_name()) {
-                        // let component: RcTrait<dyn TComponent> = component.try_downcast();
-                        // components.push(component.clone());
+                let mut components: Vec<RcAny> = Vec::new();
+                for interested_component in system.borrow().get_interest_components() {
+                    if let Some(component) = entity.components.get(interested_component) {
+                        components.push(component.clone());
+                    } else {
+                        break;
                     }
                 }
-                // 暗示了禁止一个组件在一个 Entity 中出现多次，但没做检查
                 if components.len() == system.borrow().get_interest_components().len() {
                     system.borrow_mut().tick_entity(delta_time, components);
                 }

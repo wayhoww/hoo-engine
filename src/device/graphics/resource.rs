@@ -1021,6 +1021,7 @@ impl FVertexEntry {
     }
 }
 
+#[derive(Clone)]
 pub struct FMesh {
     vertex_buffers: Vec<FVertexEntry>,
     index_buffer_view: FBufferView,
@@ -1216,6 +1217,7 @@ impl FModel {
     }
 }
 
+#[derive(Clone)]
 pub struct FRenderObject {
     model: FModel,
     uniform_view: FBufferView,

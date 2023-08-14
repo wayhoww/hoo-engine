@@ -1,15 +1,6 @@
-use hoo_object::RcObject;
 use crate::object::*;
-
-use super::TComponent;
+use hoo_object::RcObject;
 
 pub struct HStaticModelComponent {
-    mesh: RcObject<objects::HStaticMesh>
-}
-
-impl TComponent for HStaticModelComponent {
-    fn component_name(&self) -> &'static str {
-        return "HooEngine.HStaticModelComponent";   
-    }
-
+    pub mesh: RcObject<objects::HStaticMesh>,
 }

@@ -5,6 +5,8 @@ use crate::*;
 
 use nalgebra_glm as glm;
 
+use super::FGraphicsContext;
+
 pub struct FGraphicsPipeline {
     pass1: FPass,
     pass2: FPass,
@@ -23,66 +25,7 @@ impl FGraphicsPipeline {
     pub async fn new_async<'a>(encoder: &FDeviceEncoder) -> Self {
         // material
         // let shader_code = "".to_string(); // get_text_from_url("/resources/main.wgsl").await.unwrap();
-        let shader_code = r#"
-// #define UNIFORM_BIND_GROUP_Material 0
-// #define UNIFORM_BIND_GROUP_DrawCall 1
-// #define UNIFORM_BIND_GROUP_Pass 2
-// #define UNIFORM_BIND_GROUP_Task 3
-// #define UNIFORM_BIND_GROUP_Global 4
-// 有无 const 语法？
-
-const xx = 0;
-
-struct VertexOut {
-    @builtin(position) position : vec4f,
-
-    @location(0) uv0 : vec2f,
-    @location(1) normal_local : vec3f
-};
-
-struct FragmentOut {
-    @location(0) color : vec4f,
-    // @builtin(frag_depth) depth: f32,
-};
-
-struct DrawCallUniform {
-    transform_m: mat4x4f,
-    transform_mv: mat4x4f,
-    transform_mvp: mat4x4f,
-
-    // color1: f32,
-    // color2: f32,
-};
-
-@group(0) @binding(1) var<uniform> cDrawCall: DrawCallUniform;
-
-
-@vertex
-fn vsMain_base(
-    @location(0) pos: vec3f, 
-    @location(1) normal: vec3f, 
-    @location(2) uv: vec2f
-) -> VertexOut {
-    // cDrawCall.matrix_projection * 
-    var vertex_out: VertexOut;
-    vertex_out.position = cDrawCall.transform_mvp * vec4f(pos.xyz, 1.0);
-    vertex_out.uv0 = uv;
-    vertex_out.normal_local = normal;
-    
-    return vertex_out;
-}
-
-@fragment
-fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
-    // w: linear depth
-    // w/z: 0~1, 0 means near
-
-    var fragment_out: FragmentOut;
-    fragment_out.color = vec4f(abs(vertex_out.normal_local.xyz) + 0.3, 1.0);
-    // fragment_out.depth = vertex_out.position.w / vertex_out.position.z;
-    return fragment_out;
-}
-        "#;
+        let shader_code = bundle::default_shader();
         let material = rcmut!(FMaterial::new(shader_code.into()));
         material.borrow_mut().enable_shader_profile("base".into());
         material
@@ -143,7 +86,7 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
         }
     }
 
-    pub fn draw(&mut self, encoder: &mut FDeviceEncoder) {
+    pub fn draw(&mut self, encoder: &mut FDeviceEncoder, context: &mut FGraphicsContext) {
         // before draw
 
         self.count += 1;
@@ -181,6 +124,15 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
             .set_transform_projection(mat_proj)
             .update_uniform_buffer();
 
+        let mut render_objects = context.render_objects.clone();
+        for render_object in render_objects.iter_mut() {
+            // 这个混在一起会不会有些奇怪。以后这类问题可以看看其他引擎的做法
+            render_object
+            .set_transform_view(mat_view)
+            .set_transform_projection(mat_proj)
+            .update_uniform_buffer();
+        }
+
         encoder.encode_frame(|frame_encoder| {
             let swapchain_image_view = FTextureView::new_swapchain_view();
 
@@ -209,6 +161,10 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
 
             frame_encoder.encode_render_pass(&self.pass1, |pass_encoder| {
                 self.render_object1.encode(pass_encoder, "base");
+
+                for render_object in render_objects.iter() {
+                    render_object.encode(pass_encoder, "base");
+                }
             });
 
             frame_encoder.encode_render_pass(&self.pass2, |pass_encoder| {

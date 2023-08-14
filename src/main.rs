@@ -23,6 +23,8 @@ pub fn run() {
 
     initialize_hoo_engine(hoo_engine.clone());
 
+    hoo_engine.borrow().prepare();
+
     {
         let hoo_engine_ref = hoo_engine.borrow();
         let mut renderer_ref = hoo_engine_ref.get_renderer_mut();

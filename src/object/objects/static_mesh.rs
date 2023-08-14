@@ -6,12 +6,12 @@ use crate::device::graphics;
 use crate::*;
 
 pub struct HStaticMesh {
-    mesh: graphics::FMesh,
+    pub mesh: graphics::FMesh,
 }
 
 impl HStaticMesh {
-    pub fn new(path: String) -> Self {
-        // TODO: 应当做烘焙  
+    pub fn new(path: &str) -> Self {
+        // TODO: 应当做烘焙
         let file_resource = editor::importer::load_gltf_from_slice(bundle::gltf_cube()).unwrap();
         Self {
             mesh: graphics::FMesh::from_file_resource(&file_resource[0].sub_meshes[0]),

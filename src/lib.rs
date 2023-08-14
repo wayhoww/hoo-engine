@@ -8,6 +8,8 @@ mod object;
 mod utils;
 
 use global::resources::FGlobalResources;
+use hoo_object::RcObject;
+use object::context::HContext;
 
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -20,6 +22,8 @@ pub struct HooEngine {
     // graphics
     renderer: RefCell<Renderer>,
     resources: RefCell<FGlobalResources>,
+
+    object_context: RcObject<HContext>,
 }
 
 thread_local! {
@@ -44,11 +48,20 @@ impl HooEngine {
             #[allow(invalid_value)]
             renderer: RefCell::new(Renderer::new_async(window).await),
             resources: RefCell::new(FGlobalResources::new()),
+            object_context: RcObject::new(HContext::new()),
         };
         rcmut!(out)
     }
 
+    // HooEngine 要避免 borrow_mut. 不然就是个全局锁了
+
+    // called before the first frame, but after HooEngine being fully constructed and singleton being initialized
+    pub fn prepare(&self) {
+        self.object_context.borrow_mut().create_demo_space();
+    }
+
     pub fn next_frame(&self) {
+        self.object_context.borrow_mut().tick(0.0);
         self.renderer.borrow_mut().next_frame();
     }
 

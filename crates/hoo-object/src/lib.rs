@@ -41,7 +41,7 @@ pub struct RcTrait<T: 'static + ?Sized + Any> {
 }
 
 // 不清楚为啥不能 derive
-impl Clone for RcTrait<dyn Any> {
+impl<T: 'static + ?Sized + Any> Clone for RcTrait<T> {
     fn clone(&self) -> Self {
         Self {
             // id: self.id,
@@ -54,7 +54,7 @@ impl Clone for RcTrait<dyn Any> {
 #[macro_export]
 macro_rules! into_trait {
     ($obj: expr) => {{
-        let inner_clone = $obj.inner.clone();
+        let inner_clone = $obj.get_inner();
         RcTrait::new_from_object($obj, inner_clone)
     }};
 }
@@ -77,6 +77,10 @@ impl<T> RcObject<T> {
         ObjectId {
             id: Rc::as_ptr(&self.inner) as usize,
         }
+    }
+
+    pub fn get_inner(&self) -> Rc<RefCell<T>> {
+        self.inner.clone()
     }
 }
 
