@@ -1115,6 +1115,7 @@ impl FMesh {
 }
 
 // 暂时不搞 shader 变种，所以也没有 MaterialInstance
+#[derive(Clone)]
 pub struct FMaterial {
     shader_code: String,
     shader_module: HashMap<String, RcMut<FShaderModule>>,

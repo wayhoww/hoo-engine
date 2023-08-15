@@ -1,3 +1,3 @@
-mod static_mesh;
+mod static_model;
 
-pub use static_mesh::*;
+pub use static_model::*;

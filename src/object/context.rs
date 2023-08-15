@@ -6,7 +6,7 @@ use super::{
         COMPONENT_ID_TRANSFORM,
     },
     entity::HEntity,
-    objects::HStaticMesh,
+    objects::{HStaticMesh, HStaticModel, HMaterial},
     space::HSpace,
     systems::HGraphicsSystem,
 };
@@ -36,8 +36,14 @@ impl HContext {
             COMPONENT_ID_TRANSFORM,
             RcObject::new(transform_component1).into_any(),
         );
+
+        let mesh = HStaticMesh::new("meshes/cube.gltf");
+        let material = HMaterial::new("shaders/main.wgsl");
         let model = HStaticModelComponent {
-            mesh: RcObject::new(HStaticMesh::new("")),
+            model: RcObject::new(HStaticModel {
+                mesh: RcObject::new(mesh),
+                material: RcObject::new(material)
+            }),
         };
         entity1.add_component(COMPONENT_ID_STATIC_MESH, RcObject::new(model).into_any());
         space.entities.push(entity1);

@@ -1,4 +1,3 @@
-mod bundle;
 mod device;
 mod editor;
 mod global;
@@ -7,7 +6,7 @@ mod io;
 mod object;
 mod utils;
 
-use global::resources::FGlobalResources;
+use global::{configs::Configs, resources::FGlobalResources};
 use hoo_object::RcObject;
 use object::context::HContext;
 
@@ -19,6 +18,8 @@ use std::{
 use crate::graphics::Renderer;
 
 pub struct HooEngine {
+    configs: Configs,
+
     // graphics
     renderer: RefCell<Renderer>,
     resources: RefCell<FGlobalResources>,
@@ -44,8 +45,9 @@ pub fn initialize_hoo_engine(engine: Rc<RefCell<HooEngine>>) {
 impl HooEngine {
     pub async fn new_async(window: &winit::window::Window) -> Rc<RefCell<HooEngine>> {
         let out = HooEngine {
-            // assume: do not access HooEngine::renderer in init of Renderer
-            #[allow(invalid_value)]
+            configs: Configs {
+                resources_path: "resources".into(),
+            },
             renderer: RefCell::new(Renderer::new_async(window).await),
             resources: RefCell::new(FGlobalResources::new()),
             object_context: RcObject::new(HContext::new()),
@@ -79,6 +81,10 @@ impl HooEngine {
 
     pub fn get_resources_mut(&self) -> RefMut<FGlobalResources> {
         self.resources.borrow_mut()
+    }
+
+    pub fn get_configs(&self) -> &Configs {
+        &self.configs
     }
 }
 

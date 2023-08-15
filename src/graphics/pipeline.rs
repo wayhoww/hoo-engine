@@ -1,4 +1,5 @@
 use crate::device::graphics::*;
+use crate::device::io::{load_string, load_binary};
 use crate::editor::importer::load_gltf_from_slice;
 use crate::utils::*;
 use crate::*;
@@ -13,10 +14,10 @@ pub struct FGraphicsPipeline {
 
     uniform_buffer: RcMut<FBuffer>,
     uniform_view: FBufferView,
-    model: FModel,
+    // model: FModel,
 
-    render_object1: FRenderObject,
-    render_object2: FRenderObject,
+    // render_object1: FRenderObject,
+    // render_object2: FRenderObject,
 
     count: u64,
 }
@@ -25,24 +26,24 @@ impl FGraphicsPipeline {
     pub async fn new_async<'a>(encoder: &FDeviceEncoder) -> Self {
         // material
         // let shader_code = "".to_string(); // get_text_from_url("/resources/main.wgsl").await.unwrap();
-        let shader_code = bundle::default_shader();
-        let material = rcmut!(FMaterial::new(shader_code.into()));
-        material.borrow_mut().enable_shader_profile("base".into());
-        material
-            .borrow_mut()
-            .enable_shader_profile("depthOnly".into());
+        // let shader_code = load_string("shaders/main.wgsl").unwrap();
+        // let material = rcmut!(FMaterial::new(shader_code.into()));
+        // material.borrow_mut().enable_shader_profile("base".into());
+        // material
+        //     .borrow_mut()
+        //     .enable_shader_profile("depthOnly".into());
 
-        // mesh
-        let load_result = load_gltf_from_slice(bundle::gltf_cube());
+        // // mesh
+        // let load_result = load_gltf_from_slice(load_string("meshes/cube.gltf").unwrap());
 
-        let mesh = rcmut!(FMesh::from_file_resource(
-            &load_result.unwrap()[0].sub_meshes[0]
-        ));
+        // let mesh = rcmut!(FMesh::from_file_resource(
+        //     &load_result.unwrap()[0].sub_meshes[0]
+        // ));
 
-        // model
-        let model = FModel::new(mesh, material.clone());
-        let render_object1 = FRenderObject::new(model.clone());
-        let render_object2 = FRenderObject::new(model.clone());
+        // // model
+        // let model = FModel::new(mesh, material.clone());
+        // let render_object1 = FRenderObject::new(model.clone());
+        // let render_object2 = FRenderObject::new(model.clone());
 
         // faked
         let default_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
@@ -79,9 +80,9 @@ impl FGraphicsPipeline {
             pass2,
             uniform_buffer: default_uniform_buffer,
             uniform_view,
-            model,
-            render_object1,
-            render_object2,
+            // model,
+            // render_object1,
+            // render_object2,
             count: 0,
         }
     }
@@ -112,25 +113,25 @@ impl FGraphicsPipeline {
 
         encoder.set_global_uniform_buffer_view(self.uniform_view.clone());
 
-        self.render_object1
-            .set_transform_model(mat_model)
-            .set_transform_view(mat_view)
-            .set_transform_projection(mat_proj)
-            .update_uniform_buffer();
+        // self.render_object1
+        //     .set_transform_model(mat_model)
+        //     .set_transform_view(mat_view)
+        //     .set_transform_projection(mat_proj)
+        //     .update_uniform_buffer();
 
-        self.render_object2
-            .set_transform_model(mat_model_biased)
-            .set_transform_view(mat_view)
-            .set_transform_projection(mat_proj)
-            .update_uniform_buffer();
+        // self.render_object2
+        //     .set_transform_model(mat_model_biased)
+        //     .set_transform_view(mat_view)
+        //     .set_transform_projection(mat_proj)
+        //     .update_uniform_buffer();
 
         let mut render_objects = context.render_objects.clone();
         for render_object in render_objects.iter_mut() {
             // 这个混在一起会不会有些奇怪。以后这类问题可以看看其他引擎的做法
             render_object
-            .set_transform_view(mat_view)
-            .set_transform_projection(mat_proj)
-            .update_uniform_buffer();
+                .set_transform_view(mat_view)
+                .set_transform_projection(mat_proj)
+                .update_uniform_buffer();
         }
 
         encoder.encode_frame(|frame_encoder| {
@@ -160,16 +161,16 @@ impl FGraphicsPipeline {
                 .set_task_uniform_buffer_view(self.uniform_view.clone());
 
             frame_encoder.encode_render_pass(&self.pass1, |pass_encoder| {
-                self.render_object1.encode(pass_encoder, "base");
+                // self.render_object1.encode(pass_encoder, "base");
 
                 for render_object in render_objects.iter() {
                     render_object.encode(pass_encoder, "base");
                 }
             });
 
-            frame_encoder.encode_render_pass(&self.pass2, |pass_encoder| {
-                self.render_object2.encode(pass_encoder, "base");
-            });
+            // frame_encoder.encode_render_pass(&self.pass2, |pass_encoder| {
+            //     self.render_object2.encode(pass_encoder, "base");
+            // });
         });
 
         encoder.present();
