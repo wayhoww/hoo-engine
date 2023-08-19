@@ -6,7 +6,7 @@ use crate::*;
 
 use nalgebra_glm as glm;
 
-use super::FGraphicsContext;
+use super::FPipelineContext;
 
 pub struct FGraphicsPipeline {
     pass1: FPass,
@@ -23,7 +23,7 @@ pub struct FGraphicsPipeline {
 }
 
 impl FGraphicsPipeline {
-    pub async fn new_async<'a>(encoder: &FDeviceEncoder) -> Self {
+    pub fn new<'a>(encoder: &FDeviceEncoder) -> Self {
         // material
         // let shader_code = "".to_string(); // get_text_from_url("/resources/main.wgsl").await.unwrap();
         // let shader_code = load_string("shaders/main.wgsl").unwrap();
@@ -87,7 +87,7 @@ impl FGraphicsPipeline {
         }
     }
 
-    pub fn draw(&mut self, encoder: &mut FDeviceEncoder, context: &mut FGraphicsContext) {
+    pub fn draw(&mut self, encoder: &mut FDeviceEncoder, context: &mut FPipelineContext) {
         // before draw
 
         self.count += 1;

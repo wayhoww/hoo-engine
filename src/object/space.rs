@@ -17,6 +17,7 @@ impl HSpace {
 
     pub fn tick(&mut self, delta_time: f64) {
         for system in self.systems.iter() {
+            system.borrow_mut().begin_frame();
             for entity in self.entities.iter() {
                 let mut components: Vec<RcAny> = Vec::new();
                 for interested_component in system.borrow().get_interest_components() {
@@ -30,6 +31,7 @@ impl HSpace {
                     system.borrow_mut().tick_entity(delta_time, components);
                 }
             }
+            system.borrow_mut().end_frame();
         }
     }
 }

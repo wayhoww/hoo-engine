@@ -1268,6 +1268,10 @@ impl FRenderObject {
         self
     }
 
+    pub fn get_transform_model(&self) -> glm::Mat4x4 {
+        self.transform_m
+    }
+
     pub fn update_uniform_buffer(&mut self) {
         let mut uniform_struct = DrawCallUniform::default();
         uniform_struct.transform_m = self.transform_m;

@@ -4,9 +4,16 @@
 
 use nalgebra_glm as glm;
 
-use crate::device::graphics::{FModel, FRenderObject};
+use crate::{device::graphics::{FModel, FRenderObject, FDeviceEncoder}, hoo_engine};
+
+use super::FGraphicsPipeline;
+
 
 pub struct FGraphicsContext {
+    pipelines: Vec<FPipelineContext>
+}
+
+pub struct FPipelineContext {
     pub camera_projection: glm::Mat4,
     pub camera_transform: glm::Mat4,
     pub render_objects: Vec<FRenderObject>,
@@ -14,7 +21,25 @@ pub struct FGraphicsContext {
 
 impl FGraphicsContext {
     pub fn new() -> Self {
-        FGraphicsContext {
+        return Self { pipelines: vec![] }   
+    }
+
+    pub fn submit_pipeline(&mut self, pipeline_context: FPipelineContext) {
+        self.pipelines.push(pipeline_context);
+    }
+
+    pub fn encode(&mut self, encoder: &mut FDeviceEncoder) {
+        for pipeline in self.pipelines.iter_mut() {
+            pipeline.encode(encoder)
+        }
+
+        self.pipelines.clear()
+    } 
+}
+
+impl FPipelineContext {
+    pub fn new() -> Self {
+        FPipelineContext {
             camera_projection: glm::perspective(800.0 / 600.0, 45.0, 0.1, 100.0),
             camera_transform: glm::look_at(
                 &glm::vec3(0.0, 0.0, 0.0),
@@ -29,7 +54,8 @@ impl FGraphicsContext {
         self.render_objects.push(render_object);
     }
 
-    pub fn next_frame(&mut self) {
-        self.render_objects.clear();
+    pub fn encode(&mut self, encoder: &mut FDeviceEncoder) {
+        let mut pipeline = FGraphicsPipeline::new(encoder);
+        pipeline.draw(encoder, self);
     }
 }

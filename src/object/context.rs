@@ -8,7 +8,7 @@ use super::{
     entity::HEntity,
     objects::{HStaticMesh, HStaticModel, HMaterial},
     space::HSpace,
-    systems::HGraphicsSystem,
+    systems::{HGraphicsSystem, HRotatingSystem},
 };
 
 use nalgebra_glm as glm;
@@ -50,6 +50,9 @@ impl HContext {
 
         let graphics_system = RcObject::new(HGraphicsSystem::new());
         space.systems.push(into_trait!(graphics_system));
+
+        let rotating_system = RcObject::new(HRotatingSystem::new());
+        space.systems.push(into_trait!(rotating_system));
 
         self.spaces.push(RcObject::new(space));
     }
