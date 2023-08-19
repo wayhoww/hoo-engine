@@ -1,2 +1,0 @@
-pub const COMPONENT_ID_STATIC_MESH: u32 = 0;
-pub const COMPONENT_ID_TRANSFORM: u32 = 1;

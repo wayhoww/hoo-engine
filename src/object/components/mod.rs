@@ -1,7 +1,3 @@
-mod static_model;
-mod traits;
-mod transform;
+mod trivial;
 
-pub use static_model::*;
-pub use traits::*;
-pub use transform::*;
+pub use trivial::*;

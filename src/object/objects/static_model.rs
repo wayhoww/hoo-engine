@@ -1,9 +1,7 @@
-use hoo_meta;
-use hoo_meta_macros::*;
 use hoo_object::RcObject;
 
-use crate::device::graphics::{self, FMaterial, FModel};
-use crate::device::io::{load_binary, load_string};
+use crate::device::graphics::*;
+use crate::device::io::*;
 use crate::*;
 
 pub struct HMaterial {
@@ -14,32 +12,28 @@ impl HMaterial {
     pub fn new(shader_path: &str) -> Self {
         let mut mat = FMaterial::new(load_string(shader_path.into()).unwrap());
         mat.enable_shader_profile("base".into());
-        Self {
-            material: mat
-        }
+        Self { material: mat }
     }
 }
 
 pub struct HStaticMesh {
-    pub mesh: graphics::FMesh,
+    pub mesh: FMesh,
 }
 
 impl HStaticMesh {
     pub fn new(path: &str) -> Self {
         // TODO: 应当做烘焙
         let file_resource =
-            editor::importer::load_gltf_from_slice(load_string(path).unwrap())
-                .unwrap();
+            editor::importer::load_gltf_from_slice(load_string(path).unwrap()).unwrap();
         Self {
-            mesh: graphics::FMesh::from_file_resource(&file_resource[0].sub_meshes[0]),
+            mesh: FMesh::from_file_resource(&file_resource[0].sub_meshes[0]),
         }
     }
 }
 
-
 pub struct HStaticModel {
     pub material: RcObject<HMaterial>,
-    pub mesh: RcObject<HStaticMesh>
+    pub mesh: RcObject<HStaticMesh>,
 }
 
 impl HStaticModel {

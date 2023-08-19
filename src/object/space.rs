@@ -15,9 +15,22 @@ impl HSpace {
         }
     }
 
+    pub fn get_systems_by_type<T: TSystem>(&self) -> Vec<RcObject<T>> {
+        let mut result: Vec<RcObject<T>> = Vec::new();
+        for system in self.systems.iter() {
+            if let Ok(sys) = system.clone().try_downcast::<T>() {
+                result.push(sys);
+            }
+        }
+        result
+    }
+
     pub fn tick(&mut self, delta_time: f64) {
         for system in self.systems.iter() {
-            system.borrow_mut().begin_frame();
+            system.borrow_mut().begin_frame(self);
+        }
+
+        for system in self.systems.iter() {
             for entity in self.entities.iter() {
                 let mut components: Vec<RcAny> = Vec::new();
                 for interested_component in system.borrow().get_interest_components() {
@@ -28,10 +41,15 @@ impl HSpace {
                     }
                 }
                 if components.len() == system.borrow().get_interest_components().len() {
-                    system.borrow_mut().tick_entity(delta_time, components);
+                    system
+                        .borrow_mut()
+                        .tick_entity(self, delta_time, components);
                 }
             }
-            system.borrow_mut().end_frame();
+        }
+
+        for system in self.systems.iter() {
+            system.borrow_mut().end_frame(self);
         }
     }
 }

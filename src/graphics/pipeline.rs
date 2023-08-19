@@ -1,5 +1,5 @@
 use crate::device::graphics::*;
-use crate::device::io::{load_string, load_binary};
+use crate::device::io::{load_binary, load_string};
 use crate::editor::importer::load_gltf_from_slice;
 use crate::utils::*;
 use crate::*;
@@ -14,37 +14,10 @@ pub struct FGraphicsPipeline {
 
     uniform_buffer: RcMut<FBuffer>,
     uniform_view: FBufferView,
-    // model: FModel,
-
-    // render_object1: FRenderObject,
-    // render_object2: FRenderObject,
-
-    count: u64,
 }
 
 impl FGraphicsPipeline {
     pub fn new<'a>(encoder: &FDeviceEncoder) -> Self {
-        // material
-        // let shader_code = "".to_string(); // get_text_from_url("/resources/main.wgsl").await.unwrap();
-        // let shader_code = load_string("shaders/main.wgsl").unwrap();
-        // let material = rcmut!(FMaterial::new(shader_code.into()));
-        // material.borrow_mut().enable_shader_profile("base".into());
-        // material
-        //     .borrow_mut()
-        //     .enable_shader_profile("depthOnly".into());
-
-        // // mesh
-        // let load_result = load_gltf_from_slice(load_string("meshes/cube.gltf").unwrap());
-
-        // let mesh = rcmut!(FMesh::from_file_resource(
-        //     &load_result.unwrap()[0].sub_meshes[0]
-        // ));
-
-        // // model
-        // let model = FModel::new(mesh, material.clone());
-        // let render_object1 = FRenderObject::new(model.clone());
-        // let render_object2 = FRenderObject::new(model.clone());
-
         // faked
         let default_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
         default_uniform_buffer.borrow_mut().resize(1024);
@@ -80,50 +53,20 @@ impl FGraphicsPipeline {
             pass2,
             uniform_buffer: default_uniform_buffer,
             uniform_view,
-            // model,
-            // render_object1,
-            // render_object2,
-            count: 0,
         }
     }
 
     pub fn draw(&mut self, encoder: &mut FDeviceEncoder, context: &mut FPipelineContext) {
-        // before draw
+        let mat_view = {
+            let camera_rotation: glm::Mat4 =
+                glm::make_mat3(&[-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0]).to_homogeneous();
+            let view_inv = context.camera_transform * camera_rotation;
+            view_inv.try_inverse().unwrap()
+        };
 
-        self.count += 1;
-
-        let mat_model: glm::Mat4x4 =
-            glm::rotation(self.count as f32 * 0.01, &glm::vec3(0.0, 1.0, 0.0));
-
-        let mat_model_biased = glm::translation(&glm::vec3(3.0, 0.0, 0.0)) * mat_model;
-
-        let mat_view = glm::look_at(
-            &glm::vec3(3.0, 3.0, 3.0),
-            &glm::vec3(0.0, 0.0, 0.0),
-            &glm::vec3(0.0, 1.0, 0.0),
-        );
-
-        let size = encoder.get_swapchain_size();
-        let mat_proj = glm::Mat4x4::new_perspective(
-            size.0 as f32 / size.1 as f32,
-            glm::pi::<f32>() * 0.6,
-            0.1,
-            1000.0,
-        );
+        let mat_proj = context.camera_projection;
 
         encoder.set_global_uniform_buffer_view(self.uniform_view.clone());
-
-        // self.render_object1
-        //     .set_transform_model(mat_model)
-        //     .set_transform_view(mat_view)
-        //     .set_transform_projection(mat_proj)
-        //     .update_uniform_buffer();
-
-        // self.render_object2
-        //     .set_transform_model(mat_model_biased)
-        //     .set_transform_view(mat_view)
-        //     .set_transform_projection(mat_proj)
-        //     .update_uniform_buffer();
 
         let mut render_objects = context.render_objects.clone();
         for render_object in render_objects.iter_mut() {

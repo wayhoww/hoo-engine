@@ -1,4 +1,8 @@
-use std::{fs::{File, self}, io::{BufReader, Read}, path::Path};
+use std::{
+    fs::{self, File},
+    io::{BufReader, Read},
+    path::Path,
+};
 
 use crate::hoo_engine;
 
