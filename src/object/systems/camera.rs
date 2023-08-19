@@ -3,18 +3,10 @@ use std::any::Any;
 use hoo_object::RcObject;
 
 use crate::{
-    device::{
-        graphics::{FMaterial, FModel, FRenderObject},
-        io::{load_binary, load_string},
-    },
-    graphics::{FGraphicsContext, FPipelineContext},
-    hoo_engine,
     object::{
         components::*,
-        objects::{HMaterial, HStaticModel},
         space::HSpace,
     },
-    rcmut,
 };
 
 use super::HGraphicsSystem;
@@ -79,6 +71,6 @@ impl super::traits::TSystem for HCameraSystem {
     }
 
     fn get_interest_components(&self) -> &'static [u32] {
-        return &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_CAMERA];
+        &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_CAMERA]
     }
 }

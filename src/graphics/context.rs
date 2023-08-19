@@ -5,8 +5,7 @@
 use nalgebra_glm as glm;
 
 use crate::{
-    device::graphics::{FDeviceEncoder, FModel, FRenderObject},
-    hoo_engine,
+    device::graphics::{FDeviceEncoder, FRenderObject},
 };
 
 use super::FGraphicsPipeline;
@@ -23,7 +22,7 @@ pub struct FPipelineContext {
 
 impl FGraphicsContext {
     pub fn new() -> Self {
-        return Self { pipelines: vec![] };
+        Self { pipelines: vec![] }
     }
 
     pub fn submit_pipeline(&mut self, pipeline_context: FPipelineContext) {

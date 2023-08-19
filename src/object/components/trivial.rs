@@ -20,7 +20,7 @@ pub struct HTransformComponent {
 impl HTransformComponent {
     pub fn new_face_at(position: &glm::Vec3, facing_point: &glm::Vec3, up: &glm::Vec3) -> Self {
         let direction = glm::normalize(&(position - facing_point)); // 新坐标轴的 y, -y 才是正方向
-        let right = glm::normalize(&glm::cross(&direction, &up)); // 新坐标轴的 x
+        let right = glm::normalize(&glm::cross(&direction, up)); // 新坐标轴的 x
         let up = glm::cross(&right, &direction); // 新坐标轴的 z
 
         // let mut rotation_mat: glm::Mat3 = glm::zero();

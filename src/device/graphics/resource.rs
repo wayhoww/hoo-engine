@@ -523,9 +523,9 @@ pub enum ETextureFormat {
     Depth24PlusStencil8,
 }
 
-impl Into<wgpu::TextureFormat> for ETextureFormat {
-    fn into(self) -> wgpu::TextureFormat {
-        match self {
+impl From<ETextureFormat> for wgpu::TextureFormat {
+    fn from(val: ETextureFormat) -> Self {
+        match val {
             ETextureFormat::Bgra8Unorm => wgpu::TextureFormat::Bgra8Unorm,
             ETextureFormat::Bgra8UnormSrgb => wgpu::TextureFormat::Bgra8UnormSrgb,
             ETextureFormat::Rgba16Float => wgpu::TextureFormat::Rgba16Float,
@@ -582,9 +582,9 @@ pub enum EIndexFormat {
     Uint32,
 }
 
-impl Into<wgpu::IndexFormat> for EIndexFormat {
-    fn into(self) -> wgpu::IndexFormat {
-        match self {
+impl From<EIndexFormat> for wgpu::IndexFormat {
+    fn from(val: EIndexFormat) -> Self {
+        match val {
             EIndexFormat::Uint16 => wgpu::IndexFormat::Uint16,
             EIndexFormat::Uint32 => wgpu::IndexFormat::Uint32,
         }
@@ -598,7 +598,6 @@ impl TryFrom<wgpu::IndexFormat> for EIndexFormat {
         match value {
             wgpu::IndexFormat::Uint16 => Ok(EIndexFormat::Uint16),
             wgpu::IndexFormat::Uint32 => Ok(EIndexFormat::Uint32),
-            _ => Err(()),
         }
     }
 }
@@ -627,9 +626,9 @@ pub enum EVertexFormat {
     Float32x4,
 }
 
-impl Into<wgpu::VertexFormat> for EVertexFormat {
-    fn into(self) -> wgpu::VertexFormat {
-        match self {
+impl From<EVertexFormat> for wgpu::VertexFormat {
+    fn from(val: EVertexFormat) -> Self {
+        match val {
             EVertexFormat::Float32 => wgpu::VertexFormat::Float32,
             EVertexFormat::Float32x2 => wgpu::VertexFormat::Float32x2,
             EVertexFormat::Float32x3 => wgpu::VertexFormat::Float32x3,
@@ -1076,9 +1075,9 @@ impl FMesh {
         let vertex_normal = Self::make_buffer_from_slice(&sub_mesh.normals);
         let vertex_uv0 = Self::make_buffer_from_slice(&sub_mesh.uv0);
 
-        let vertex_position_size = vertex_position.borrow().size() as u64;
-        let vertex_normal_size = vertex_normal.borrow().size() as u64;
-        let vertex_uv0_size = vertex_uv0.borrow().size() as u64;
+        let vertex_position_size = vertex_position.borrow().size();
+        let vertex_normal_size = vertex_normal.borrow().size();
+        let vertex_uv0_size = vertex_uv0.borrow().size();
 
         let view_position = FBufferView::new(
             vertex_position,
@@ -1296,7 +1295,7 @@ impl FRenderObject {
         );
 
         encoder.setup_pipeline(
-            &mesh.get_vertex_buffers(),
+            mesh.get_vertex_buffers(),
             &material.get_shader_module(shader_profile).unwrap(),
         );
         encoder.draw(&cmd);

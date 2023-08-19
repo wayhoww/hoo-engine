@@ -10,7 +10,7 @@ pub struct HMaterial {
 
 impl HMaterial {
     pub fn new(shader_path: &str) -> Self {
-        let mut mat = FMaterial::new(load_string(shader_path.into()).unwrap());
+        let mut mat = FMaterial::new(load_string(shader_path).unwrap());
         mat.enable_shader_profile("base".into());
         Self { material: mat }
     }

@@ -1,8 +1,8 @@
 use crate::device::graphics::*;
-use crate::device::io::{load_binary, load_string};
-use crate::editor::importer::load_gltf_from_slice;
+
+
 use crate::utils::*;
-use crate::*;
+
 
 use nalgebra_glm as glm;
 
@@ -12,7 +12,6 @@ pub struct FGraphicsPipeline {
     pass1: FPass,
     pass2: FPass,
 
-    uniform_buffer: RcMut<FBuffer>,
     uniform_view: FBufferView,
 }
 
@@ -51,7 +50,6 @@ impl FGraphicsPipeline {
         Self {
             pass1,
             pass2,
-            uniform_buffer: default_uniform_buffer,
             uniform_view,
         }
     }

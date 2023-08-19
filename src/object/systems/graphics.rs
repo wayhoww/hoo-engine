@@ -4,17 +4,14 @@ use hoo_object::RcObject;
 
 use crate::{
     device::{
-        graphics::{FMaterial, FModel, FRenderObject},
-        io::{load_binary, load_string},
+        graphics::{FRenderObject},
     },
-    graphics::{FGraphicsContext, FPipelineContext},
+    graphics::{FPipelineContext},
     hoo_engine,
     object::{
         components::*,
-        objects::{HMaterial, HStaticModel},
         space::HSpace,
     },
-    rcmut,
 };
 
 pub struct HGraphicsSystem {
@@ -38,15 +35,15 @@ impl HGraphicsSystem {
 }
 
 impl super::traits::TSystem for HGraphicsSystem {
-    fn begin_frame(&mut self, space: &HSpace) {
+    fn begin_frame(&mut self, _space: &HSpace) {
         let context = FPipelineContext::new();
         self.graphics_context = Some(context);
     }
 
     fn tick_entity(
         &mut self,
-        space: &HSpace,
-        delta_time: f64,
+        _space: &HSpace,
+        _delta_time: f64,
         components: Vec<hoo_object::RcTrait<dyn Any>>,
     ) {
         let static_model: RcObject<HStaticModelComponent> =
@@ -69,7 +66,7 @@ impl super::traits::TSystem for HGraphicsSystem {
             .add_render_object(render_object);
     }
 
-    fn end_frame(&mut self, space: &HSpace) {
+    fn end_frame(&mut self, _space: &HSpace) {
         hoo_engine()
             .borrow()
             .get_renderer()
@@ -77,6 +74,6 @@ impl super::traits::TSystem for HGraphicsSystem {
     }
 
     fn get_interest_components(&self) -> &'static [u32] {
-        return &[COMPONENT_ID_STATIC_MESH, COMPONENT_ID_TRANSFORM];
+        &[COMPONENT_ID_STATIC_MESH, COMPONENT_ID_TRANSFORM]
     }
 }

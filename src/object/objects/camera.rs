@@ -5,6 +5,7 @@ pub enum FCameraProjection {
         near: f32,
         far: f32,
     },
+    #[allow(dead_code)]
     Orthographic {
         width: f32,
         height: f32,
