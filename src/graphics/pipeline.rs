@@ -1,8 +1,7 @@
 use crate::device::graphics::*;
 
-
+use crate::object::objects::FShaderLight;
 use crate::utils::*;
-
 
 use nalgebra_glm as glm;
 
@@ -13,6 +12,17 @@ pub struct FGraphicsPipeline {
     pass2: FPass,
 
     uniform_view: FBufferView,
+
+    task_uniform_buffer: RcMut<FBuffer>,
+    task_uniform_view: FBufferView,
+}
+
+#[derive(Clone, Debug)]
+#[repr(C, packed)]
+pub struct FTaskUnifromBuffer {
+    light_count: u32,
+    _padding_0: [u32; 3],
+    lights: [FShaderLight; 16],
 }
 
 impl FGraphicsPipeline {
@@ -21,6 +31,11 @@ impl FGraphicsPipeline {
         let default_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
         default_uniform_buffer.borrow_mut().resize(1024);
         let uniform_view = FBufferView::new_uniform(default_uniform_buffer.clone());
+
+        // task
+        let task_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
+        task_uniform_buffer.borrow_mut().resize(std::mem::size_of::<FShaderLight>() as u64);
+        let task_uniform_view = FBufferView::new_uniform(task_uniform_buffer.clone());
 
         // pass
         let depth_texture = FTexture::new_and_manage(
@@ -51,6 +66,8 @@ impl FGraphicsPipeline {
             pass1,
             pass2,
             uniform_view,
+            task_uniform_buffer,
+            task_uniform_view,
         }
     }
 
@@ -64,7 +81,20 @@ impl FGraphicsPipeline {
 
         let mat_proj = context.camera_projection;
 
+        let mut task_uniform_buffer_data = FTaskUnifromBuffer {
+            light_count: (context.lights.len() as u32).into(),
+            _padding_0: [0; 3],
+            lights: [ FShaderLight::default(); 16 ],
+        };
+
+        for (i, light) in context.lights.iter().enumerate() {
+            task_uniform_buffer_data.lights[i] = light.clone();
+        }
+
+        self.task_uniform_buffer.borrow_mut().update_by_struct(&task_uniform_buffer_data);
+        
         encoder.set_global_uniform_buffer_view(self.uniform_view.clone());
+        encoder.set_task_uniform_buffer_view(self.task_uniform_view.clone());
 
         let mut render_objects = context.render_objects.clone();
         for render_object in render_objects.iter_mut() {
@@ -96,10 +126,6 @@ impl FGraphicsPipeline {
                 ELoadOp::Load,
                 EStoreOp::Store,
             )]);
-
-            frame_encoder
-                .get_device_encoder()
-                .set_task_uniform_buffer_view(self.uniform_view.clone());
 
             frame_encoder.encode_render_pass(&self.pass1, |pass_encoder| {
                 // self.render_object1.encode(pass_encoder, "base");

@@ -34,6 +34,7 @@ typed-arena = "2.0.2"
 wgpu = "0.17.0"  # src/device/graphics
 v8 = "0.75.0"
 nalgebra = "0.32.3"
+iced = { version = "0.10.0", features = ["debug"] }
 
 [dependencies.hoo-object]
 path = "./crates/hoo-object"

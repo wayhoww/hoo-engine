@@ -4,9 +4,7 @@
 
 use nalgebra_glm as glm;
 
-use crate::{
-    device::graphics::{FDeviceEncoder, FRenderObject},
-};
+use crate::{device::graphics::{FDeviceEncoder, FRenderObject}, object::objects::FShaderLight};
 
 use super::FGraphicsPipeline;
 
@@ -18,6 +16,7 @@ pub struct FPipelineContext {
     pub camera_projection: glm::Mat4,
     pub camera_transform: glm::Mat4,
     pub render_objects: Vec<FRenderObject>,
+    pub lights: Vec<FShaderLight>
 }
 
 impl FGraphicsContext {
@@ -48,6 +47,7 @@ impl FPipelineContext {
                 &glm::vec3(0.0, 0.0, 1.0),
             ),
             render_objects: Vec::new(),
+            lights: Vec::new()
         }
     }
 
@@ -61,6 +61,10 @@ impl FPipelineContext {
 
     pub fn set_camera_projection(&mut self, camera_projection: glm::Mat4) {
         self.camera_projection = camera_projection;
+    }
+
+    pub fn set_lights(&mut self, lights: Vec<FShaderLight>) {
+        self.lights = lights;
     }
 
     pub fn encode(&mut self, encoder: &mut FDeviceEncoder) {

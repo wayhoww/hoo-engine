@@ -40,13 +40,10 @@ impl FPipeline {
             .collect::<Vec<_>>();
 
         let entries = (vertex_entries.iter().zip(attributes.iter()))
-            .map(|(entry, attr)| {
-                
-                wgpu::VertexBufferLayout {
-                    array_stride: entry.stride,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: attr,
-                }
+            .map(|(entry, attr)| wgpu::VertexBufferLayout {
+                array_stride: entry.stride,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: attr,
             })
             .collect::<Vec<_>>();
 

@@ -1,5 +1,3 @@
-
-
 use crate::check;
 use crate::io::resource::{RMesh, RSubMesh};
 use crate::utils::bin_string_to_vec;

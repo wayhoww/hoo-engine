@@ -2,12 +2,7 @@ use std::any::Any;
 
 use hoo_object::RcObject;
 
-use crate::{
-    object::{
-        components::*,
-        space::HSpace,
-    },
-};
+use crate::object::{components::*, space::HSpace};
 
 pub struct HRotatingSystem {
     counter: i64,
@@ -33,13 +28,13 @@ impl super::traits::TSystem for HRotatingSystem {
         let transform: RcObject<HTransformComponent> =
             components[0].clone().try_downcast().unwrap();
 
-        let _transform_ref = transform.borrow_mut();
+        let mut transform_ref = transform.borrow_mut();
 
-        // let angle = self.counter as f32 * 0.01;
-        // transform_ref.rotation = nalgebra_glm::quat_angle_axis(angle, &nalgebra_glm::vec3(0.0, 0.0, 1.0));
+        let angle = self.counter as f32 * 0.001;
+        transform_ref.rotation = nalgebra_glm::quat_angle_axis(angle, &nalgebra_glm::vec3(0.0, 0.0, 1.0));
     }
 
-    fn get_interest_components(&self) -> &'static [u32] {
-        &[COMPONENT_ID_TRANSFORM]
+    fn get_interested_components(&self) -> &'static [u32] {
+        &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_STATIC_MODEL]
     }
 }

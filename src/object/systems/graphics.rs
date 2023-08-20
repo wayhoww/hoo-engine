@@ -3,16 +3,13 @@ use std::any::Any;
 use hoo_object::RcObject;
 
 use crate::{
-    device::{
-        graphics::{FRenderObject},
-    },
-    graphics::{FPipelineContext},
+    device::graphics::FRenderObject,
+    graphics::FPipelineContext,
     hoo_engine,
-    object::{
-        components::*,
-        space::HSpace,
-    },
+    object::{components::*, space::HSpace},
 };
+
+use super::HLightingSystem;
 
 pub struct HGraphicsSystem {
     graphics_context: Option<FPipelineContext>,
@@ -23,10 +20,6 @@ impl HGraphicsSystem {
         Self {
             graphics_context: None,
         }
-    }
-
-    pub fn get_context(&self) -> &FPipelineContext {
-        self.graphics_context.as_ref().unwrap()
     }
 
     pub fn get_context_mut(&mut self) -> &mut FPipelineContext {
@@ -66,14 +59,23 @@ impl super::traits::TSystem for HGraphicsSystem {
             .add_render_object(render_object);
     }
 
-    fn end_frame(&mut self, _space: &HSpace) {
+    fn end_frame(&mut self, space: &HSpace) {
+        let mut context = self.graphics_context.take().unwrap();
+
+        let lighting_system = space.get_executed_systems_by_type::<HLightingSystem>();
+        if let Some(lighting_system) = lighting_system.first() {
+            let lighting_system = lighting_system.borrow();
+            let lights = lighting_system.get_lights();
+            context.set_lights(lights.clone());
+        }
+
         hoo_engine()
             .borrow()
             .get_renderer()
-            .submit_pipeline(self.graphics_context.take().unwrap());
+            .submit_pipeline(context);
     }
 
-    fn get_interest_components(&self) -> &'static [u32] {
-        &[COMPONENT_ID_STATIC_MESH, COMPONENT_ID_TRANSFORM]
+    fn get_interested_components(&self) -> &'static [u32] {
+        &[COMPONENT_ID_STATIC_MODEL, COMPONENT_ID_TRANSFORM]
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hoo_object::{RcAny};
+use hoo_object::RcAny;
 
 pub struct HEntity {
     pub components: HashMap<u32, RcAny>, // 绝对不应该这么做，但是先这样～

@@ -2,13 +2,13 @@ use hoo_object::{into_trait, RcObject, RcTrait};
 
 use super::{
     components::{
-        HCameraComponent, HStaticModelComponent, HTransformComponent, COMPONENT_ID_CAMERA,
-        COMPONENT_ID_STATIC_MESH, COMPONENT_ID_TRANSFORM,
+        HCameraComponent, HLightComponent, HStaticModelComponent, HTransformComponent,
+        COMPONENT_ID_CAMERA, COMPONENT_ID_STATIC_MODEL, COMPONENT_ID_TRANSFORM, COMPONENT_ID_LIGHT,
     },
     entity::HEntity,
-    objects::{HCamera, HMaterial, HStaticMesh, HStaticModel},
+    objects::{FColor, HCamera, HLight, HMaterial, HStaticMesh, HStaticModel},
     space::HSpace,
-    systems::{HCameraSystem, HGraphicsSystem, HRotatingSystem},
+    systems::{HCameraSystem, HGraphicsSystem, HRotatingSystem, HLightingSystem},
 };
 
 use nalgebra_glm as glm;
@@ -45,13 +45,13 @@ impl HContext {
                 material: RcObject::new(material),
             }),
         };
-        entity1.add_component(COMPONENT_ID_STATIC_MESH, RcObject::new(model).into_any());
+        entity1.add_component(COMPONENT_ID_STATIC_MODEL, RcObject::new(model).into_any());
         space.entities.push(entity1);
 
         let entity2 = {
             let mut entity = HEntity::new();
             let transform_component = HTransformComponent::new_face_at(
-                &glm::vec3(3.0, 3.0, 3.0),
+                &glm::vec3(0.0, 5.0, 3.0),
                 &glm::vec3(0.0, 0.0, 0.0),
                 &glm::vec3(0.0, 0.0, 1.0),
             );
@@ -77,14 +77,46 @@ impl HContext {
         };
         space.entities.push(entity2);
 
-        let graphics_system = RcObject::new(HGraphicsSystem::new());
-        space.systems.push(into_trait!(graphics_system));
+        let entity3 = {
+            let mut entity = HEntity::new();
+            let transform_component = HTransformComponent::new_trs(
+                &(glm::vec3(2.0, 5.0, 3.0) * 3.0),
+                &glm::quat(0.0, 0.0, 0.0, 1.0),
+                &glm::vec3(1.0, 1.0, 1.0),
+            );
+            let light_component = HLightComponent {
+                light: RcObject::new(HLight::new_point(
+                    FColor {
+                        r: 1.0 * 1000.0,
+                        g: 1.0 * 1000.0,
+                        b: 0.5 * 1000.0,
+                    },
+                    10.0,
+                )),
+            };
+            entity.add_component(
+                COMPONENT_ID_TRANSFORM,
+                RcObject::new(transform_component).into_any(),
+            );
+            entity.add_component(
+                COMPONENT_ID_LIGHT,
+                RcObject::new(light_component).into_any(),
+            );
+            entity
+        };
+        space.entities.push(entity3);
+
+        let light_system = RcObject::new(HLightingSystem::new());
+        space.systems.push(into_trait!(light_system));
 
         let rotating_system = RcObject::new(HRotatingSystem::new());
         space.systems.push(into_trait!(rotating_system));
 
         let camera_system = RcObject::new(HCameraSystem::new());
         space.systems.push(into_trait!(camera_system));
+
+        let graphics_system = RcObject::new(HGraphicsSystem::new());
+        space.systems.push(into_trait!(graphics_system));
 
         self.spaces.push(RcObject::new(space));
     }

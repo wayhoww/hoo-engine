@@ -2,14 +2,17 @@ use std::any::Any;
 
 use hoo_object::RcObject;
 
-use crate::{
-    object::{
-        components::*,
-        space::HSpace,
-    },
-};
+use crate::object::{components::*, space::HSpace};
 
 use super::HGraphicsSystem;
+
+// 有实际需求的时候再考虑多相机的问题，修改不是很大
+// 初步思路是：
+// CameraSystem 变成 CameraCollectorSystem
+// 增加 Space::GetExecutedSystem，GraphicsSystem 获取 CameraCollectorSystem
+// GraphicsSystem 遍历所有 Camera, 每个 Camera 对应一个 Context
+// 使用稳定的 EntityID，并允许从 Component 获取 EntityID（不是必要的）
+// 给 CameraComponent 增加一个字段，用于存储相机产物（没有产物 / 一个贴图）
 
 pub struct HCameraSystem {
     found: bool,
@@ -70,7 +73,7 @@ impl super::traits::TSystem for HCameraSystem {
         }
     }
 
-    fn get_interest_components(&self) -> &'static [u32] {
+    fn get_interested_components(&self) -> &'static [u32] {
         &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_CAMERA]
     }
 }

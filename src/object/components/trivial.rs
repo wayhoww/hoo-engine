@@ -2,7 +2,7 @@ use crate::object::*;
 use hoo_object::RcObject;
 use nalgebra_glm as glm;
 
-pub const COMPONENT_ID_STATIC_MESH: u32 = 0;
+pub const COMPONENT_ID_STATIC_MODEL: u32 = 0;
 pub const COMPONENT_ID_TRANSFORM: u32 = 1;
 pub const COMPONENT_ID_CAMERA: u32 = 2;
 pub const COMPONENT_ID_LIGHT: u32 = 3;
@@ -18,18 +18,21 @@ pub struct HTransformComponent {
 }
 
 impl HTransformComponent {
-    pub fn new_face_at(position: &glm::Vec3, facing_point: &glm::Vec3, up: &glm::Vec3) -> Self {
-        let direction = glm::normalize(&(position - facing_point)); // 新坐标轴的 y, -y 才是正方向
-        let right = glm::normalize(&glm::cross(&direction, up)); // 新坐标轴的 x
-        let up = glm::cross(&right, &direction); // 新坐标轴的 z
+    pub fn new_trs(position: &glm::Vec3, rotation: &glm::Quat, scale: &glm::Vec3) -> Self {
+        HTransformComponent {
+            position: *position,
+            rotation: *rotation,
+            scale: *scale,
+        }
+    }
 
-        // let mut rotation_mat: glm::Mat3 = glm::zero();
-        // rotation_mat.set_column(0, &right);
-        // rotation_mat.set_column(1, &direction);
-        // rotation_mat.set_column(2, &up);
+    pub fn new_face_at(position: &glm::Vec3, facing_point: &glm::Vec3, up: &glm::Vec3) -> Self {
+        let new_y = glm::normalize(&(position - facing_point)); // 新坐标轴的 y, -y 才是正方向
+        let new_x = glm::normalize(&glm::cross(&new_y, up)); // 新坐标轴的 x
+        let new_z = glm::cross(&new_x, &new_y); // 新坐标轴的 z
 
         let rotation = nalgebra::UnitQuaternion::from_rotation_matrix(
-            &nalgebra::Rotation3::from_basis_unchecked(&[right, direction, up]),
+            &nalgebra::Rotation3::from_basis_unchecked(&[new_x, new_y, new_z]),
         );
 
         HTransformComponent {
@@ -59,4 +62,6 @@ pub struct HCameraComponent {
     pub camera: RcObject<objects::HCamera>,
 }
 
-pub struct HLightComponent {}
+pub struct HLightComponent {
+    pub light: RcObject<objects::HLight>,
+}
