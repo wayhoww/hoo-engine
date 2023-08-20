@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub enum FCameraProjection {
     Perspective {
         fov: f32,
@@ -25,17 +26,9 @@ impl Default for FCameraProjection {
     }
 }
 
-pub struct HCamera {
-    pub camera_projection: FCameraProjection,
-}
-
-impl HCamera {
-    pub fn new(camera_projection: FCameraProjection) -> Self {
-        Self { camera_projection }
-    }
-
+impl FCameraProjection {
     pub fn get_projection_matrix(&self) -> nalgebra_glm::Mat4 {
-        match &self.camera_projection {
+        match self {
             FCameraProjection::Perspective {
                 fov,
                 aspect,
@@ -56,5 +49,36 @@ impl HCamera {
                 *far,
             ),
         }
+    }
+
+    pub fn set_aspect_ratio(&mut self, ar: f32) {
+        match self {
+            FCameraProjection::Perspective {
+                fov,
+                aspect,
+                near,
+                far,
+            } => *aspect = ar,
+            FCameraProjection::Orthographic {
+                width,
+                height,
+                near,
+                far,
+            } => *width = *height * ar,
+        }
+    }
+}
+
+pub struct HCamera {
+    pub camera_projection: FCameraProjection,
+}
+
+impl HCamera {
+    pub fn new(camera_projection: FCameraProjection) -> Self {
+        Self { camera_projection }
+    }
+
+    pub fn get_projection_matrix(&self) -> nalgebra_glm::Mat4 {
+        return self.camera_projection.get_projection_matrix();
     }
 }

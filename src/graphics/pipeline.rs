@@ -34,7 +34,9 @@ impl FGraphicsPipeline {
 
         // task
         let task_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
-        task_uniform_buffer.borrow_mut().resize(std::mem::size_of::<FShaderLight>() as u64);
+        task_uniform_buffer
+            .borrow_mut()
+            .resize(std::mem::size_of::<FShaderLight>() as u64);
         let task_uniform_view = FBufferView::new_uniform(task_uniform_buffer.clone());
 
         // pass
@@ -84,15 +86,17 @@ impl FGraphicsPipeline {
         let mut task_uniform_buffer_data = FTaskUnifromBuffer {
             light_count: (context.lights.len() as u32).into(),
             _padding_0: [0; 3],
-            lights: [ FShaderLight::default(); 16 ],
+            lights: [FShaderLight::default(); 16],
         };
 
         for (i, light) in context.lights.iter().enumerate() {
             task_uniform_buffer_data.lights[i] = light.clone();
         }
 
-        self.task_uniform_buffer.borrow_mut().update_by_struct(&task_uniform_buffer_data);
-        
+        self.task_uniform_buffer
+            .borrow_mut()
+            .update_by_struct(&task_uniform_buffer_data);
+
         encoder.set_global_uniform_buffer_view(self.uniform_view.clone());
         encoder.set_task_uniform_buffer_view(self.task_uniform_view.clone());
 
@@ -139,7 +143,5 @@ impl FGraphicsPipeline {
             //     self.render_object2.encode(pass_encoder, "base");
             // });
         });
-
-        encoder.present();
     }
 }

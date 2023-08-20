@@ -6,9 +6,11 @@ mod io;
 mod object;
 mod utils;
 
+use editor::FEditor;
 use global::{configs::Configs, resources::FGlobalResources};
 use hoo_object::RcObject;
 use object::context::HContext;
+use utils::RcMut;
 
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -23,6 +25,10 @@ pub struct HooEngine {
     // graphics
     renderer: RefCell<Renderer>,
     resources: RefCell<FGlobalResources>,
+
+    // editor
+    editor: RefCell<FEditor>,
+    egui_platform: RefCell<egui_winit_platform::Platform>,
 
     object_context: RcObject<HContext>,
 }
@@ -43,13 +49,26 @@ pub fn initialize_hoo_engine(engine: Rc<RefCell<HooEngine>>) {
 }
 
 impl HooEngine {
-    pub async fn new_async(window: &winit::window::Window) -> Rc<RefCell<HooEngine>> {
+    pub async fn new_async(window: &RcMut<winit::window::Window>) -> Rc<RefCell<HooEngine>> {
+        let window_ref = window.borrow();
+        let platform =
+            egui_winit_platform::Platform::new(egui_winit_platform::PlatformDescriptor {
+                physical_width: window_ref.inner_size().width,
+                physical_height: window_ref.inner_size().height,
+                scale_factor: window_ref.scale_factor(),
+                font_definitions: egui::FontDefinitions::default(),
+                style: Default::default(),
+            });
+        let platform = RefCell::new(platform);
+        let renderer = RefCell::new(Renderer::new_async(window).await);
         let out = HooEngine {
             configs: Configs {
                 resources_path: "resources".into(),
             },
-            renderer: RefCell::new(Renderer::new_async(window).await),
+            renderer: renderer,
             resources: RefCell::new(FGlobalResources::new()),
+            editor: RefCell::new(FEditor::new()),
+            egui_platform: platform,
             object_context: RcObject::new(HContext::new()),
         };
         rcmut!(out)
@@ -85,6 +104,26 @@ impl HooEngine {
 
     pub fn get_configs(&self) -> &Configs {
         &self.configs
+    }
+
+    pub fn get_editor(&self) -> Ref<FEditor> {
+        self.editor.borrow()
+    }
+
+    pub fn get_editor_mut(&self) -> RefMut<FEditor> {
+        self.editor.borrow_mut()
+    }
+
+    pub fn get_egui_platform(&self) -> Ref<egui_winit_platform::Platform> {
+        self.egui_platform.borrow()
+    }
+
+    pub fn get_egui_platform_mut(&self) -> RefMut<egui_winit_platform::Platform> {
+        self.egui_platform.borrow_mut()
+    }
+
+    pub fn receive_event(&self, event: &winit::event::Event<()>) {
+        self.egui_platform.borrow_mut().handle_event(event);
     }
 }
 

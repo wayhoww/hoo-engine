@@ -38,7 +38,6 @@ impl HSpace {
     }
 
     pub fn tick(&mut self, delta_time: f64) {
-
         for system in self.systems.iter() {
             system.borrow_mut().begin_frame(self);
         }

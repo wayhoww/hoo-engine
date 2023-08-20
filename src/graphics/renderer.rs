@@ -13,7 +13,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new_async(window: &winit::window::Window) -> Self {
+    pub async fn new_async(window: &RcMut<winit::window::Window>) -> Self {
         let graphics_encoder = FDeviceEncoder::new_async(window).await;
 
         Self {
@@ -38,5 +38,9 @@ impl Renderer {
             .borrow_mut()
             .encode(&mut self.graphics_encoder);
         *self.graphics_context.borrow_mut() = FGraphicsContext::new();
+    }
+
+    pub fn get_swapchain_size(&self) -> (u32, u32) {
+        self.graphics_encoder.get_swapchain_size()
     }
 }

@@ -66,7 +66,8 @@ impl FShaderLight {
         position: &nalgebra_glm::Vec3,
         rotation: &nalgebra_glm::Quat,
     ) -> Self {
-        let direction = nalgebra_glm::quat_rotate_vec3(rotation, &nalgebra_glm::vec3(0.0, -1.0, 0.0));
+        let direction =
+            nalgebra_glm::quat_rotate_vec3(rotation, &nalgebra_glm::vec3(0.0, -1.0, 0.0));
         Self {
             position: *position,
             _padding_0: 0,

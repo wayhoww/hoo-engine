@@ -2,7 +2,10 @@ use std::any::Any;
 
 use hoo_object::RcObject;
 
-use crate::object::{components::*, space::HSpace};
+use crate::{
+    hoo_engine,
+    object::{components::*, space::HSpace},
+};
 
 use super::HGraphicsSystem;
 
@@ -45,12 +48,21 @@ impl super::traits::TSystem for HCameraSystem {
             todo!("log error here");
         } else {
             self.found = true;
-
             // TODO: multiple viewport in a same space
             let graphics_systems = space.get_systems_by_type::<HGraphicsSystem>();
+
             for sys in graphics_systems {
                 let transform_mat = transform_ref.get_matrix_ignoring_scale();
-                let projection_mat = camera_desc.get_projection_matrix();
+                let projection_mat = {
+                    let mut proj = camera_desc.camera_projection.clone();
+                    if camera_ref.auto_aspect {
+                        let swapchain_size =
+                            hoo_engine().borrow().get_renderer().get_swapchain_size();
+                        let aspect_ratio = 1.0 * swapchain_size.0 as f32 / swapchain_size.1 as f32;
+                        proj.set_aspect_ratio(aspect_ratio);
+                    }
+                    proj.get_projection_matrix()
+                };
 
                 let mut sys_ref = sys.borrow_mut();
                 sys_ref

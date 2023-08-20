@@ -3,12 +3,12 @@ use hoo_object::{into_trait, RcObject, RcTrait};
 use super::{
     components::{
         HCameraComponent, HLightComponent, HStaticModelComponent, HTransformComponent,
-        COMPONENT_ID_CAMERA, COMPONENT_ID_STATIC_MODEL, COMPONENT_ID_TRANSFORM, COMPONENT_ID_LIGHT,
+        COMPONENT_ID_CAMERA, COMPONENT_ID_LIGHT, COMPONENT_ID_STATIC_MODEL, COMPONENT_ID_TRANSFORM,
     },
     entity::HEntity,
     objects::{FColor, HCamera, HLight, HMaterial, HStaticMesh, HStaticModel},
     space::HSpace,
-    systems::{HCameraSystem, HGraphicsSystem, HRotatingSystem, HLightingSystem},
+    systems::{HCameraSystem, HGraphicsSystem, HLightingSystem, HRotatingSystem},
 };
 
 use nalgebra_glm as glm;
@@ -68,6 +68,7 @@ impl HContext {
                         far: 1000.0,
                     },
                 )),
+                auto_aspect: true,
             };
             entity.add_component(
                 COMPONENT_ID_CAMERA,

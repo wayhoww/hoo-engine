@@ -4,7 +4,10 @@
 
 use nalgebra_glm as glm;
 
-use crate::{device::graphics::{FDeviceEncoder, FRenderObject}, object::objects::FShaderLight};
+use crate::{
+    device::graphics::{FDeviceEncoder, FRenderObject},
+    object::objects::FShaderLight,
+};
 
 use super::FGraphicsPipeline;
 
@@ -16,7 +19,7 @@ pub struct FPipelineContext {
     pub camera_projection: glm::Mat4,
     pub camera_transform: glm::Mat4,
     pub render_objects: Vec<FRenderObject>,
-    pub lights: Vec<FShaderLight>
+    pub lights: Vec<FShaderLight>,
 }
 
 impl FGraphicsContext {
@@ -47,7 +50,7 @@ impl FPipelineContext {
                 &glm::vec3(0.0, 0.0, 1.0),
             ),
             render_objects: Vec::new(),
-            lights: Vec::new()
+            lights: Vec::new(),
         }
     }
 

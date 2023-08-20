@@ -1,5 +1,6 @@
 use std::cell::{Ref, RefCell};
 use std::convert::TryFrom;
+use std::ops::Deref;
 
 use crate::utils::*;
 use crate::*;
@@ -143,11 +144,86 @@ enum EUniformBufferType {
     Global,
 }
 
+pub struct FEditorRenderer {
+    window: RcMut<winit::window::Window>,
+    render_pass: egui_wgpu_backend::RenderPass,
+    time: std::time::Instant,
+    textures_delta: Option<egui::TexturesDelta>,
+}
+
+impl FEditorRenderer {
+    pub fn new(
+        window: &RcMut<winit::window::Window>,
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+    ) -> Self {
+        let render_pass = egui_wgpu_backend::RenderPass::new(&device, surface_format, 1);
+
+        Self {
+            window: window.clone(),
+            render_pass,
+            time: std::time::Instant::now(),
+            textures_delta: None,
+        }
+    }
+
+    pub fn encode(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        command_encoder: &mut wgpu::CommandEncoder,
+        attachment: &wgpu::TextureView,
+        size: (u32, u32),
+    ) {
+        if let Some(delta) = self.textures_delta.take() {
+            self.render_pass
+                .remove_textures(delta)
+                .expect("remove texture ok");
+        }
+
+        let hoo_engine_rc = hoo_engine();
+        let hoo_engine = hoo_engine_rc.borrow();
+        let mut platform = hoo_engine.get_egui_platform_mut();
+        platform.update_time(self.time.elapsed().as_secs_f64());
+        platform.begin_frame();
+
+        hoo_engine.get_editor().draw(&platform.context());
+
+        let full_output = platform.end_frame(Some(self.window.borrow().deref()));
+        let paint_jobs = platform.context().tessellate(full_output.shapes);
+
+        let screen_descriptor = egui_wgpu_backend::ScreenDescriptor {
+            physical_width: size.0,
+            physical_height: size.1,
+            scale_factor: self.window.borrow().scale_factor() as f32,
+        };
+        let tdelta: egui::TexturesDelta = full_output.textures_delta;
+        self.render_pass
+            .add_textures(device, queue, &tdelta)
+            .unwrap();
+        self.render_pass
+            .update_buffers(device, queue, &paint_jobs, &screen_descriptor);
+
+        self.render_pass
+            .execute(
+                command_encoder,
+                attachment,
+                &paint_jobs,
+                &screen_descriptor,
+                None,
+            )
+            .unwrap();
+    }
+}
+
 pub struct FDeviceEncoder {
+    instance: wgpu::Instance,
     device: wgpu::Device,
     queue: wgpu::Queue,
 
     surface: wgpu::Surface,
+    surface_present_mode: wgpu::PresentMode,
+    surface_alpha_mode: wgpu::CompositeAlphaMode,
     swapchain_texture: RefCell<Option<wgpu::SurfaceTexture>>,
     swapchain_size: (u32, u32),
     swapchain_format: ETextureFormat,
@@ -156,6 +232,9 @@ pub struct FDeviceEncoder {
 
     uniform_buffer_view_global: Option<FBufferView>,
     uniform_buffer_view_task: Option<FBufferView>,
+
+    editor: FEditorRenderer, // todo: optional
+    window: RcMut<winit::window::Window>,
 }
 
 pub struct FPassEncoder<'a: 'c, 'b: 'c, 'c, 'd: 'c, 'e> {
@@ -207,19 +286,40 @@ impl FDeviceEncoder {
         &self.bind_group_layouts
     }
 
+    pub fn resize_surface(&mut self) {
+        let window = self.window.borrow();
+        let new_size = (window.inner_size().width, window.inner_size().height);
+        if new_size == self.swapchain_size {
+            return;
+        }
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: self.swapchain_format.into(),
+            width: new_size.0,
+            height: new_size.1,
+            present_mode: self.surface_present_mode,
+            alpha_mode: self.surface_alpha_mode,
+            view_formats: vec![],
+        };
+        self.surface =
+            unsafe { self.instance.create_surface(self.window.borrow().deref()) }.unwrap();
+        self.surface.configure(&self.device, &config);
+        self.swapchain_size = new_size;
+    }
+
     // impl
 
-    pub fn new(window: &winit::window::Window) -> Self {
+    pub fn new(window: &RcMut<winit::window::Window>) -> Self {
         futures::executor::block_on(Self::new_async(window))
     }
 
-    pub async fn new_async(window: &winit::window::Window) -> Self {
+    pub async fn new_async(window: &RcMut<winit::window::Window>) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             dx12_shader_compiler: Default::default(),
         });
 
-        let surface = unsafe { instance.create_surface(&window) }.unwrap();
+        let surface = unsafe { instance.create_surface(window.borrow().deref()) }.unwrap();
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -242,7 +342,7 @@ impl FDeviceEncoder {
             .await
             .unwrap();
 
-        let size = window.inner_size();
+        let size = window.borrow().inner_size();
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -264,16 +364,26 @@ impl FDeviceEncoder {
 
         let bind_group_layouts = Self::make_bind_group_layouts(&device);
 
+        let editor = FEditorRenderer::new(window, &device, surface_format);
+
         Self {
+            instance,
             device,
             queue,
+
             surface,
+            surface_present_mode: surface_caps.present_modes[0],
+            surface_alpha_mode: surface_caps.alpha_modes[0],
+
             swapchain_size: (size.width, size.height),
             swapchain_texture: RefCell::new(Some(surface_texture)),
             swapchain_format: ETextureFormat::try_from(surface_format).unwrap(),
+
             bind_group_layouts,
             uniform_buffer_view_global: None,
             uniform_buffer_view_task: None,
+            editor: editor,
+            window: window.clone(),
         }
     }
 
@@ -339,7 +449,7 @@ impl FDeviceEncoder {
 
         let res_ref = res.iter().map(|x| x.borrow()).collect::<Vec<_>>();
 
-        let command_encoder = {
+        let mut command_encoder = {
             let mut frame_encoder = FFrameEncoder {
                 encoder: self,
                 command_encoder,
@@ -351,10 +461,23 @@ impl FDeviceEncoder {
             frame_encoder.command_encoder
         };
 
+        let swapchain_view = FTextureView::new_swapchain_view().get_device_texture_view(&self);
+
+        self.editor.encode(
+            &self.device,
+            &self.queue,
+            &mut command_encoder,
+            &swapchain_view,
+            self.get_swapchain_size(),
+        );
+
         self.queue.submit(std::iter::once(command_encoder.finish()));
+        self.present();
+
+        self.resize_surface();
     }
 
-    pub fn present(&mut self) {
+    fn present(&mut self) {
         let _ = self.get_swapchain_texture();
         self.swapchain_texture.take().unwrap().present();
     }
