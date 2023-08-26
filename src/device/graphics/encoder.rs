@@ -146,9 +146,12 @@ enum EUniformBufferType {
 
 pub struct FEditorRenderer {
     window: RcMut<winit::window::Window>,
-    render_pass: egui_wgpu_backend::RenderPass,
     time: std::time::Instant,
-    textures_delta: Option<egui::TexturesDelta>,
+
+    egui_renderer: egui_wgpu::Renderer,
+    pass_buffer_view: FBufferView,
+
+    frame_data: Option<(Vec<egui::ClippedPrimitive>, egui::FullOutput)>
 }
 
 impl FEditorRenderer {
@@ -157,62 +160,86 @@ impl FEditorRenderer {
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
     ) -> Self {
-        let render_pass = egui_wgpu_backend::RenderPass::new(&device, surface_format, 1);
-
         Self {
             window: window.clone(),
-            render_pass,
             time: std::time::Instant::now(),
-            textures_delta: None,
+            frame_data: None,
+            egui_renderer: egui_wgpu::Renderer::new(device, surface_format, None, 1),
+            pass_buffer_view: FBufferView::new_uniform(FBuffer::new_and_manage(
+                BBufferUsages::Uniform,
+            )),
         }
     }
 
-    pub fn encode(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        command_encoder: &mut wgpu::CommandEncoder,
-        attachment: &wgpu::TextureView,
-        size: (u32, u32),
-    ) {
-        if let Some(delta) = self.textures_delta.take() {
-            self.render_pass
-                .remove_textures(delta)
-                .expect("remove texture ok");
-        }
+    pub fn get_pass(&self) -> FPass {
+        let mut pass = FPass::new(self.pass_buffer_view.clone());
+        pass.set_color_attachments(vec![FAttachment {
+            texture_view: FTextureView::new_swapchain_view(),
+            load_op: ELoadOp::Load,
+            store_op: EStoreOp::Store,
+            clear_value: FClearValue::Float4{r: 0.0, g: 0.0, b: 0.0, a: 1.0},
+        }]);
+        pass
+    }
+
+    pub fn prepare(&mut self, frame_encoder: &mut FFrameEncoder) {
 
         let hoo_engine_rc = hoo_engine();
         let hoo_engine = hoo_engine_rc.borrow();
-        let mut platform = hoo_engine.get_egui_platform_mut();
-        platform.update_time(self.time.elapsed().as_secs_f64());
-        platform.begin_frame();
 
-        hoo_engine.get_editor().draw(&platform.context());
+        let egui_context = hoo_engine.get_egui_context_mut();
+        egui_context.begin_frame(hoo_engine.take_egui_input());
+        hoo_engine.get_editor().draw(&egui_context);
+        let full_output = egui_context.end_frame();
+        let paint_jobs = egui_context.tessellate(full_output.shapes.clone());
 
-        let full_output = platform.end_frame(Some(self.window.borrow().deref()));
-        let paint_jobs = platform.context().tessellate(full_output.shapes);
+        let scale_factor = self.window.borrow().scale_factor() as f32;
+        let size = frame_encoder.encoder.get_swapchain_size();
 
-        let screen_descriptor = egui_wgpu_backend::ScreenDescriptor {
-            physical_width: size.0,
-            physical_height: size.1,
-            scale_factor: self.window.borrow().scale_factor() as f32,
+        let descriptor = egui_wgpu::renderer::ScreenDescriptor {
+            size_in_pixels: [size.0, size.1],
+            pixels_per_point: scale_factor,
         };
-        let tdelta: egui::TexturesDelta = full_output.textures_delta;
-        self.render_pass
-            .add_textures(device, queue, &tdelta)
-            .unwrap();
-        self.render_pass
-            .update_buffers(device, queue, &paint_jobs, &screen_descriptor);
 
-        self.render_pass
-            .execute(
-                command_encoder,
-                attachment,
-                &paint_jobs,
-                &screen_descriptor,
-                None,
-            )
-            .unwrap();
+        for tex in full_output.textures_delta.set.iter() {
+            self.egui_renderer.update_texture(&frame_encoder.encoder.device, &frame_encoder.encoder.queue, tex.0, &tex.1);
+        }
+        
+        self.egui_renderer.update_buffers(
+            &frame_encoder.encoder.device,
+            &frame_encoder.encoder.queue,
+            &mut frame_encoder.command_encoder,
+            &paint_jobs,
+            &descriptor,
+        );
+
+        self.frame_data = Some((paint_jobs, full_output));
+    }
+
+    pub fn encode<'command_encoder, 'pass>(
+        &'command_encoder mut self,
+        mut pass_encoder: FPassEncoder<'pass, '_>
+    ) where 'command_encoder: 'pass {
+
+        let scale_factor = self.window.borrow().scale_factor() as f32;
+        let size = pass_encoder.encoder.get_swapchain_size();
+        let descriptor = egui_wgpu::renderer::ScreenDescriptor {
+            size_in_pixels: [size.0, size.1],
+            pixels_per_point: scale_factor,
+        };
+
+        let frame_data = self.frame_data.clone().unwrap();
+
+        let paint_jobs = pass_encoder.transient_resources_cache.alloc(frame_data.0);
+        self.egui_renderer.render(&mut pass_encoder.render_pass, paint_jobs, &descriptor);
+    }
+
+    pub fn free(&mut self) {
+        let frame_data = self.frame_data.take().unwrap();
+        
+        for tex in frame_data.1.textures_delta.free {
+            self.egui_renderer.free_texture(&tex);
+        }
     }
 }
 
@@ -233,7 +260,7 @@ pub struct FDeviceEncoder {
     uniform_buffer_view_global: Option<FBufferView>,
     uniform_buffer_view_task: Option<FBufferView>,
 
-    editor: FEditorRenderer, // todo: optional
+    editor: Option<RcMut<FEditorRenderer>>,
     window: RcMut<winit::window::Window>,
 }
 
@@ -244,18 +271,21 @@ pub struct FFrameEncoder<'command_encoder, 'device_encoder> {
     command_encoder: wgpu::CommandEncoder,
     resources: &'command_encoder Vec<Ref<'command_encoder, dyn TGPUResource>>,
 }
-
-pub struct FPassEncoder<'command_encoder, 'device_encoder> {
+// paint_jobs
+pub struct FPassEncoder<'pass, 'device_encoder> {
     // access using a function
     encoder: &'device_encoder FDeviceEncoder,
 
     // keep them private
     pass: FPass,
-    render_pass: wgpu::RenderPass<'command_encoder>,
-    resources: &'command_encoder Vec<Ref<'command_encoder, dyn TGPUResource>>,
+    render_pass: wgpu::RenderPass<'pass>,
+    // 这些资源实际上的生命周期比 'pass 长
+    resources: &'pass Vec<Ref<'pass, dyn TGPUResource>>,
 
-    render_pipeline_cache: &'command_encoder typed_arena::Arena<wgpu::RenderPipeline>,
-    bind_group_cache: &'command_encoder typed_arena::Arena<wgpu::BindGroup>,
+    transient_resources_cache: &'pass bumpalo::Bump,
+    // render_pipeline_cache: &'command_encoder typed_arena::Arena<wgpu::RenderPipeline>,
+    // bind_group_cache: &'command_encoder typed_arena::Arena<wgpu::BindGroup>,
+    // egui_paint_jobs_cache: &'command_encoder typed_arena::Arena<Vec<egui::ClippedPrimitive>>  // 或许用 untyped 更好? 避免这边放一堆类型
 }
 
 impl FDeviceEncoder {
@@ -364,8 +394,6 @@ impl FDeviceEncoder {
 
         let bind_group_layouts = Self::make_bind_group_layouts(&device);
 
-        let editor = FEditorRenderer::new(window, &device, surface_format);
-
         Self {
             instance,
             device,
@@ -382,9 +410,14 @@ impl FDeviceEncoder {
             bind_group_layouts,
             uniform_buffer_view_global: None,
             uniform_buffer_view_task: None,
-            editor: editor,
+            editor: None,
             window: window.clone(),
         }
+    }
+
+    pub fn prepare(&mut self) {
+        let editor = FEditorRenderer::new(&self.window, &self.device, self.swapchain_format.into());
+        self.editor = Some(rcmut!(editor));
     }
 
     pub fn get_swapchain_size(&self) -> (u32, u32) {
@@ -449,27 +482,28 @@ impl FDeviceEncoder {
 
         let res_ref = res.iter().map(|x| x.borrow()).collect::<Vec<_>>();
 
-        let mut command_encoder = {
+        let editor = self.editor.as_ref().unwrap().clone();
+
+        let command_encoder = {
             let mut frame_encoder = FFrameEncoder {
                 encoder: self,
                 command_encoder,
                 resources: &res_ref,
             };
-
             frame_closure(&mut frame_encoder);
+        
+            let mut editor = editor.borrow_mut();
+            let pass = editor.get_pass();
 
+            editor.prepare(&mut frame_encoder);
+            frame_encoder.encode_render_pass(pass, |pass_encoder| {
+                editor.encode(pass_encoder);
+            });
+            editor.free();
             frame_encoder.command_encoder
         };
 
-        let swapchain_view = FTextureView::new_swapchain_view().get_device_texture_view(&self);
-
-        self.editor.encode(
-            &self.device,
-            &self.queue,
-            &mut command_encoder,
-            &swapchain_view,
-            self.get_swapchain_size(),
-        );
+        // let swapchain_view = FTextureView::new_swapchain_view().get_device_texture_view(&self);
 
         self.queue.submit(std::iter::once(command_encoder.finish()));
         self.present();
@@ -484,10 +518,19 @@ impl FDeviceEncoder {
 }
 
 impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_encoder> {
-    pub fn encode_render_pass<F: FnOnce(&mut FPassEncoder)>(
+    pub fn encode_render_pass<F: FnOnce(FPassEncoder)>(
         &mut self,
         render_pass: FPass,
         pass_closure: F,
+    ) {
+        self.encode_render_pass_with_argument(render_pass, |a, _| pass_closure(a), ());
+    }
+
+    pub fn encode_render_pass_with_argument<E, F: FnOnce(FPassEncoder, E)>(
+        &mut self,
+        render_pass: FPass,
+        pass_closure: F,
+        extra_data: E
     ) {
         let color_attachments_views: Vec<_> = render_pass
             .get_color_attachments()
@@ -542,20 +585,18 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
             .command_encoder
             .begin_render_pass(&render_pass_descriptor);
 
-        let render_pipeline_cache = typed_arena::Arena::new();
-        let bindgroup_cache = typed_arena::Arena::new();
+        let transient_resources_cache = bumpalo::Bump::new();
 
-        let mut pass_encoder = FPassEncoder {
+        let pass_encoder = FPassEncoder {
             pass: render_pass,
             resources: self.resources,
             encoder: self.encoder,
             render_pass: pass,
 
-            render_pipeline_cache: &render_pipeline_cache,
-            bind_group_cache: &bindgroup_cache,
+            transient_resources_cache: &transient_resources_cache
         };
 
-        pass_closure(&mut pass_encoder);
+        pass_closure(pass_encoder, extra_data);
     }
 
     pub fn get_device_encoder(&mut self) -> &mut FDeviceEncoder {
@@ -572,7 +613,7 @@ impl<'command_encoder, 'device_encoder> FPassEncoder<'command_encoder, 'device_e
         let mut pipeline = FPipeline::new();
         let device_pipeline =
             pipeline.create_device_resource_with_pass(self, vertex_entries, shader_module);
-        let pipeline_ref = self.render_pipeline_cache.alloc(device_pipeline);
+        let pipeline_ref = self.transient_resources_cache.alloc(device_pipeline);
         self.render_pass.set_pipeline(pipeline_ref);
     }
 
@@ -664,7 +705,7 @@ impl<'command_encoder, 'device_encoder> FPassEncoder<'command_encoder, 'device_e
                 entries: &bind_group_entries,
             });
 
-        let bindgroup_0_ref = self.bind_group_cache.alloc(bindgroup_0);
+        let bindgroup_0_ref = self.transient_resources_cache.alloc(bindgroup_0);
 
         self.render_pass.set_bind_group(0, bindgroup_0_ref, &[]);
 

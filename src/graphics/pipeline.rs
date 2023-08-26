@@ -131,11 +131,11 @@ impl FGraphicsPipeline {
                 EStoreOp::Store,
             )]);
 
-            frame_encoder.encode_render_pass(self.pass1.clone(), |pass_encoder| {
+            frame_encoder.encode_render_pass(self.pass1.clone(), |mut pass_encoder| {
                 // self.render_object1.encode(pass_encoder, "base");
 
                 for render_object in render_objects.iter() {
-                    render_object.encode(pass_encoder, "base");
+                    render_object.encode(&mut pass_encoder, "base");
                 }
             });
 

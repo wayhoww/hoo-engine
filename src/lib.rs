@@ -14,7 +14,7 @@ use utils::RcMut;
 
 use std::{
     cell::{Ref, RefCell, RefMut},
-    rc::Rc,
+    rc::Rc, ops::Deref,
 };
 
 use crate::graphics::Renderer;
@@ -28,7 +28,11 @@ pub struct HooEngine {
 
     // editor
     editor: RefCell<FEditor>,
-    egui_platform: RefCell<egui_winit_platform::Platform>,
+    egui_context: RefCell<egui::Context>,
+    egui_winit_state: RefCell<egui_winit::State>,
+
+    // window
+    window: RcMut<winit::window::Window>,
 
     object_context: RcObject<HContext>,
 }
@@ -51,15 +55,13 @@ pub fn initialize_hoo_engine(engine: Rc<RefCell<HooEngine>>) {
 impl HooEngine {
     pub async fn new_async(window: &RcMut<winit::window::Window>) -> Rc<RefCell<HooEngine>> {
         let window_ref = window.borrow();
-        let platform =
-            egui_winit_platform::Platform::new(egui_winit_platform::PlatformDescriptor {
-                physical_width: window_ref.inner_size().width,
-                physical_height: window_ref.inner_size().height,
-                scale_factor: window_ref.scale_factor(),
-                font_definitions: egui::FontDefinitions::default(),
-                style: Default::default(),
-            });
-        let platform = RefCell::new(platform);
+
+        let mut egui_winit_state = egui_winit::State::new(window_ref.deref());
+        egui_winit_state.set_pixels_per_point(window_ref.scale_factor() as f32);
+
+        let context = egui::Context::default();
+        let context = RefCell::new(context);
+
         let renderer = RefCell::new(Renderer::new_async(window).await);
         let out = HooEngine {
             configs: Configs {
@@ -68,8 +70,10 @@ impl HooEngine {
             renderer: renderer,
             resources: RefCell::new(FGlobalResources::new()),
             editor: RefCell::new(FEditor::new()),
-            egui_platform: platform,
+            egui_context: context,
+            egui_winit_state: RefCell::new(egui_winit_state),
             object_context: RcObject::new(HContext::new()),
+            window: window.clone()
         };
         rcmut!(out)
     }
@@ -78,6 +82,7 @@ impl HooEngine {
 
     // called before the first frame, but after HooEngine being fully constructed and singleton being initialized
     pub fn prepare(&self) {
+        self.renderer.borrow_mut().prepare();
         self.object_context.borrow_mut().create_demo_space();
     }
 
@@ -114,16 +119,34 @@ impl HooEngine {
         self.editor.borrow_mut()
     }
 
-    pub fn get_egui_platform(&self) -> Ref<egui_winit_platform::Platform> {
-        self.egui_platform.borrow()
+    pub fn get_egui_context(&self) -> Ref<egui::Context> {
+        self.egui_context.borrow()
     }
 
-    pub fn get_egui_platform_mut(&self) -> RefMut<egui_winit_platform::Platform> {
-        self.egui_platform.borrow_mut()
+    pub fn get_egui_context_mut(&self) -> RefMut<egui::Context> {
+        self.egui_context.borrow_mut()
+    }
+
+    // pub fn get_egui_winit_state(&self) -> Ref<egui_winit::State> {
+    //     self.egui_winit_state.borrow()
+    // }
+
+    // pub fn get_egui_winit_state_mut(&self) -> RefMut<egui_winit::State> {
+    //     self.egui_winit_state.borrow_mut()
+    // }
+
+    pub fn take_egui_input(&self) -> egui::RawInput {
+        self.egui_winit_state.borrow_mut().take_egui_input(self.window.borrow().deref())
     }
 
     pub fn receive_event(&self, event: &winit::event::Event<()>) {
-        self.egui_platform.borrow_mut().handle_event(event);
+
+        match event {
+            winit::event::Event::WindowEvent { window_id: _, event } => {
+                let _ = self.egui_winit_state.borrow_mut().on_event(&self.get_egui_context(), event);
+            },
+            _ => {}
+        }
     }
 }
 

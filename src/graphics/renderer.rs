@@ -26,6 +26,10 @@ impl Renderer {
         // do nothing
     }
 
+    pub fn prepare(&mut self) {
+        self.graphics_encoder.prepare();
+    }
+
     pub fn submit_pipeline(&self, pipeline_context: FPipelineContext) {
         self.graphics_context
             .borrow_mut()
