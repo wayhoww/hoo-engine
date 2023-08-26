@@ -17,8 +17,8 @@ impl FEditor {
     }
 
     fn custom_painting(&mut self, ui: &mut egui::Ui) {
-        let (rect, response) =
-            ui.allocate_exact_size(egui::Vec2::splat(300.0), egui::Sense::drag());
+        // let (rect, response) =
+        //     ui.allocate_exact_size(egui::Vec2::splat(300.0), egui::Sense::drag());
 
         // self.angle += response.drag_delta().x * 0.01;
 
@@ -30,6 +30,6 @@ impl FEditor {
         //     rect,
         //     // callback: std::sync::Arc::new(egui_wgpu::CallbackFn::paint()),
         // };
-        ui.painter().add(callback);
+        // ui.painter().add(callback);
     }
 }

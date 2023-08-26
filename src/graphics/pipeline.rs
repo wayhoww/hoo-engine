@@ -131,7 +131,7 @@ impl FGraphicsPipeline {
                 EStoreOp::Store,
             )]);
 
-            frame_encoder.encode_render_pass(&self.pass1, |pass_encoder| {
+            frame_encoder.encode_render_pass(self.pass1.clone(), |pass_encoder| {
                 // self.render_object1.encode(pass_encoder, "base");
 
                 for render_object in render_objects.iter() {

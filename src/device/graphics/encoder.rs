@@ -237,25 +237,25 @@ pub struct FDeviceEncoder {
     window: RcMut<winit::window::Window>,
 }
 
-pub struct FPassEncoder<'a: 'c, 'b: 'c, 'c, 'd: 'c, 'e> {
+pub struct FFrameEncoder<'command_encoder, 'device_encoder> {
     // access using a function
-    encoder: &'a FDeviceEncoder,
-
-    // keep them private
-    pass: &'b FPass,
-    render_pass: wgpu::RenderPass<'c>,
-    resources: &'d Vec<Ref<'e, dyn TGPUResource>>,
-
-    render_pipeline_cache: &'d typed_arena::Arena<wgpu::RenderPipeline>,
-    bind_group_cache: &'d typed_arena::Arena<wgpu::BindGroup>,
-}
-
-pub struct FFrameEncoder<'a, 'b, 'c> {
-    // access using a function
-    encoder: &'a mut FDeviceEncoder,
+    encoder: &'device_encoder mut FDeviceEncoder,
     // private
     command_encoder: wgpu::CommandEncoder,
-    resources: &'b Vec<Ref<'c, dyn TGPUResource>>,
+    resources: &'command_encoder Vec<Ref<'command_encoder, dyn TGPUResource>>,
+}
+
+pub struct FPassEncoder<'command_encoder, 'device_encoder> {
+    // access using a function
+    encoder: &'device_encoder FDeviceEncoder,
+
+    // keep them private
+    pass: FPass,
+    render_pass: wgpu::RenderPass<'command_encoder>,
+    resources: &'command_encoder Vec<Ref<'command_encoder, dyn TGPUResource>>,
+
+    render_pipeline_cache: &'command_encoder typed_arena::Arena<wgpu::RenderPipeline>,
+    bind_group_cache: &'command_encoder typed_arena::Arena<wgpu::BindGroup>,
 }
 
 impl FDeviceEncoder {
@@ -483,10 +483,10 @@ impl FDeviceEncoder {
     }
 }
 
-impl FFrameEncoder<'_, '_, '_> {
+impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_encoder> {
     pub fn encode_render_pass<F: FnOnce(&mut FPassEncoder)>(
         &mut self,
-        render_pass: &FPass,
+        render_pass: FPass,
         pass_closure: F,
     ) {
         let color_attachments_views: Vec<_> = render_pass
@@ -563,7 +563,7 @@ impl FFrameEncoder<'_, '_, '_> {
     }
 }
 
-impl<'c> FPassEncoder<'_, '_, 'c, '_, '_> {
+impl<'command_encoder, 'device_encoder> FPassEncoder<'command_encoder, 'device_encoder> {
     pub fn setup_pipeline(
         &mut self,
         vertex_entries: &[FVertexEntry],
