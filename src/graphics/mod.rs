@@ -1,9 +1,9 @@
 mod context;
+mod passes;
 mod pipeline;
 mod renderer;
-mod passes;
 
 pub use context::*;
+pub use passes::*;
 pub use pipeline::*;
 pub use renderer::*;
-pub use passes::*;

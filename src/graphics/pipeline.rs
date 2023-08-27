@@ -5,8 +5,8 @@ use crate::{hoo_engine, utils::*};
 
 use nalgebra_glm as glm;
 
-use super::FPipelineContext;
 use super::affiliate::FCursorPass;
+use super::FPipelineContext;
 
 pub struct FGraphicsPipeline {
     pass1: FPass,
@@ -195,7 +195,9 @@ impl FGraphicsPipeline {
             BTextureUsages::Attachment,
         );
 
-        depth_stencil_texture.borrow_mut().set_size(context.render_target_size);
+        depth_stencil_texture
+            .borrow_mut()
+            .set_size(context.render_target_size);
         let depth_stencil_texture_view = FTextureView::new(depth_stencil_texture.clone());
         self.pass1.set_depth_stencil_attachment(FAttachment {
             texture_view: depth_stencil_texture_view.clone(),
@@ -244,9 +246,9 @@ impl FGraphicsPipeline {
             }
         });
 
-        frame_encoder.encode_render_pass(self.cursor_pass.get_pass(self.rt_color.clone()), |mut pass_encoder| {
-            self.cursor_pass.encode_pass(&mut pass_encoder);
-        });
+        // frame_encoder.encode_render_pass(self.cursor_pass.get_pass(self.rt_color.clone()), |mut pass_encoder| {
+        //     self.cursor_pass.encode_pass(&mut pass_encoder);
+        // });
 
         // frame_encoder.encode_render_pass(&self.pass2, |pass_encoder| {
         //     self.render_object2.encode(pass_encoder, "base");

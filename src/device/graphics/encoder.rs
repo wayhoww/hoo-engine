@@ -10,7 +10,7 @@ use super::resource::*;
 use strum::*;
 use strum_macros::*;
 
-use egui_wgpu::wgpu as wgpu;
+use egui_wgpu::wgpu;
 
 struct FPipeline {
     // descriptor
@@ -172,7 +172,12 @@ impl FEguiGraphicsContext<'_, '_, '_, '_> {
         uitex
     }
 
-    pub fn image_with_scale(&mut self, ui: &mut egui::Ui, texture: &RcMut<FTexture>, scale: f32) -> egui::Response {
+    pub fn image_with_scale(
+        &mut self,
+        ui: &mut egui::Ui,
+        texture: &RcMut<FTexture>,
+        scale: f32,
+    ) -> egui::Response {
         let uitex = self.register_texture_online(texture);
         let tex_ref = texture.borrow();
         ui.image(
@@ -208,15 +213,23 @@ impl FEditorRenderer {
     }
 
     pub fn get_pass(&self) -> FPass {
+        let bg_color = hoo_engine()
+            .borrow()
+            .egui_context
+            .borrow()
+            .style()
+            .visuals
+            .extreme_bg_color;
+
         let mut pass = FPass::new(self.pass_buffer_view.clone());
         pass.set_color_attachments(vec![FAttachment {
             texture_view: FTextureView::new_swapchain_view(),
-            load_op: ELoadOp::Load,
+            load_op: ELoadOp::Clear, // add a switch
             store_op: EStoreOp::Store,
             clear_value: FClearValue::Float4 {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
+                r: bg_color.r() as f32 / 255.0,
+                g: bg_color.g() as f32 / 255.0,
+                b: bg_color.b() as f32 / 255.0,
                 a: 1.0,
             },
         }]);

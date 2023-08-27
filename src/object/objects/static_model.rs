@@ -25,6 +25,22 @@ impl HStaticMesh {
         // TODO: 应当做烘焙
         let file_resource =
             editor::importer::load_gltf_from_slice(load_string(path).unwrap()).unwrap();
+        // println!(
+        //     "{:?}",
+        //     file_resource[0].sub_meshes[0].positions.iter().fold(
+        //         (
+        //             (f32::MAX, f32::MAX, f32::MAX),
+        //             (f32::MIN, f32::MIN, f32::MIN)
+        //         ),
+        //         |((min_x, min_y, min_z), (max_x, max_y, max_z)), vec| {
+        //             (
+        //                 (min_x.min(vec.x), min_y.min(vec.y), min_z.min(vec.z)),
+        //                 (max_x.max(vec.x), max_y.max(vec.y), max_z.max(vec.z)),
+        //             )
+        //         },
+        //     )
+        // );
+
         Self {
             mesh: FMesh::from_file_resource(&file_resource[0].sub_meshes[0]),
         }
