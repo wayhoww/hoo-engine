@@ -2,7 +2,8 @@ use crate::{
     device::{
         graphics::{
             BBufferUsages, EBufferViewType, EVertexFormat, FAttachment, FBuffer, FBufferView,
-            FDrawCommand, FMaterial, FPass, FPassEncoder, FTexture, FTextureView, FVertexEntry,
+            FDrawCommand, FGraphicsPass, FGraphicsPassEncoder, FMaterial, FTexture, FTextureView,
+            FVertexEntry,
         },
         io::load_string,
     },
@@ -10,7 +11,7 @@ use crate::{
 };
 
 pub struct FCursorPass {
-    pass: FPass,
+    pass: FGraphicsPass,
     draw_comand: FDrawCommand,
     material: FMaterial,
 }
@@ -20,13 +21,13 @@ impl FCursorPass {
         let mut mat = FMaterial::new(load_string("shaders/cursor.wgsl").unwrap());
         mat.enable_shader_profile("base".into());
         Self {
-            pass: FPass::default(),
+            pass: FGraphicsPass::default(),
             draw_comand: Self::create_fullscreen_draw_command(),
             material: mat,
         }
     }
 
-    pub fn get_pass(&self, color: FTextureView) -> FPass {
+    pub fn get_pass(&self, color: FTextureView) -> FGraphicsPass {
         let mut pass = self.pass.clone();
         pass.set_color_attachments(vec![FAttachment::new_append_to_view(color)]);
         return pass;
@@ -68,7 +69,7 @@ impl FCursorPass {
         )
     }
 
-    pub fn encode_pass(&self, pass_encoder: &mut FPassEncoder) {
+    pub fn encode_pass(&self, pass_encoder: &mut FGraphicsPassEncoder) {
         pass_encoder.setup_pipeline(
             &self.draw_comand.get_vertex_buffers(),
             &self.material.get_shader_module("base").unwrap(),

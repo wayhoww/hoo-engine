@@ -1,5 +1,6 @@
 use crate::device::graphics::*;
 
+use crate::device::io::load_string;
 use crate::object::objects::FShaderLight;
 use crate::{hoo_engine, utils::*};
 
@@ -9,9 +10,10 @@ use super::affiliate::FCursorPass;
 use super::FPipelineContext;
 
 pub struct FGraphicsPipeline {
-    pass1: FPass,
-    pass2: FPass,
+    pass1: FGraphicsPass,
+    pass2: FComputePass,
     cursor_pass: FCursorPass,
+    compute_shader: RcMut<FShaderModule>,
 
     rt_color: FTextureView,
 
@@ -61,9 +63,8 @@ impl FGraphicsPipeline {
         // depth_texture.borrow_mut().set_size(size);
         // let depth_texture_view = FTextureView::new(depth_texture.clone());
 
-        let pass1 = FPass::new(uniform_view.clone());
-        let pass2 = FPass::new(uniform_view.clone());
-
+        let pass1 = FGraphicsPass::new(uniform_view.clone());
+        let pass2 = FComputePass::default();
         // pass1.set_depth_stencil_attachment(FAttachment {
         //     texture_view: depth_texture_view.clone(),
         //     load_op: ELoadOp::Clear,
@@ -92,10 +93,14 @@ impl FGraphicsPipeline {
         //     EStoreOp::Store,
         // )]);
 
+        let cs = FShaderModule::new_and_manage(load_string("shaders/compute.wgsl").unwrap());
+        cs.borrow_mut().set_compute_stage_entry("main".into());
+
         Self {
             pass1,
             pass2,
             cursor_pass: FCursorPass::new(),
+            compute_shader: cs,
             uniform_view,
             task_uniform_buffer,
             task_uniform_view,
@@ -153,11 +158,11 @@ impl FGraphicsPipeline {
                 })
                 .clone()]);
 
-                self.pass2.set_color_attachments(vec![FAttachment::new(
-                    swapchain_image_view.clone(),
-                    ELoadOp::Load,
-                    EStoreOp::Store,
-                )]);
+                // self.pass2.set_color_attachments(vec![FAttachment::new(
+                //     swapchain_image_view.clone(),
+                //     ELoadOp::Load,
+                //     EStoreOp::Store,
+                // )]);
 
                 // context.
             }
@@ -182,11 +187,11 @@ impl FGraphicsPipeline {
                 })
                 .clone()]);
 
-                self.pass2.set_color_attachments(vec![FAttachment::new(
-                    color_texture_view.clone(),
-                    ELoadOp::Load,
-                    EStoreOp::Store,
-                )]);
+                // self.pass2.set_color_attachments(vec![FAttachment::new(
+                //     color_texture_view.clone(),
+                //     ELoadOp::Load,
+                //     EStoreOp::Store,
+                // )]);
             }
         };
 
@@ -205,12 +210,12 @@ impl FGraphicsPipeline {
             store_op: EStoreOp::Discard,
             clear_value: FClearValue::Float(1f32),
         });
-        self.pass2.set_depth_stencil_attachment(FAttachment {
-            texture_view: depth_stencil_texture_view.clone(),
-            load_op: ELoadOp::Clear,
-            store_op: EStoreOp::Discard,
-            clear_value: FClearValue::Float(1f32),
-        });
+        // self.pass2.set_depth_stencil_attachment(FAttachment {
+        //     texture_view: depth_stencil_texture_view.clone(),
+        //     load_op: ELoadOp::Clear,
+        //     store_op: EStoreOp::Discard,
+        //     clear_value: FClearValue::Float(1f32),
+        // });
     }
 
     pub fn draw(&mut self, frame_encoder: &mut FFrameEncoder, context: &mut FPipelineContext) {
@@ -244,6 +249,10 @@ impl FGraphicsPipeline {
             for render_object in context.render_objects.iter() {
                 render_object.encode(&mut pass_encoder, "base");
             }
+        });
+
+        frame_encoder.encode_compute_pass(self.pass2.clone(), |mut pass_encoder| {
+            pass_encoder.dispatch(&self.compute_shader, (3, 1, 2));
         });
 
         // frame_encoder.encode_render_pass(self.cursor_pass.get_pass(self.rt_color.clone()), |mut pass_encoder| {

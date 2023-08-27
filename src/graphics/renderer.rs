@@ -9,7 +9,7 @@ pub struct Renderer {
     graphics_context: RefCell<FGraphicsContext>,
     // uniform_buffer: FBuffer,
     // model: Option<FModel>,
-    // pass: Option<FPass>,
+    // pass: Option<FGraphicsPass>,
     main_viewport_texture: Option<RcMut<FTexture>>,
 }
 

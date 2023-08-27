@@ -11,7 +11,7 @@ use crate::*;
 use super::utils::*;
 
 use super::{
-    encoder::{FDeviceEncoder, FPassEncoder},
+    encoder::{FDeviceEncoder, FGraphicsPassEncoder},
     utils::struct_to_bin_string,
 };
 
@@ -225,6 +225,7 @@ pub struct FShaderModule {
 
     vertex_stage_entry: Option<String>,
     fragment_stage_entry: Option<String>,
+    compute_stage_entry: Option<String>,
 
     device_module: Option<wgpu::ShaderModule>,
 
@@ -238,6 +239,7 @@ impl FShaderModule {
 
             vertex_stage_entry: None,
             fragment_stage_entry: None,
+            compute_stage_entry: None,
 
             device_module: None,
             consolidation_id: 0,
@@ -269,6 +271,15 @@ impl FShaderModule {
 
     pub fn get_fragment_stage_entry(&self) -> Option<&String> {
         self.fragment_stage_entry.as_ref()
+    }
+
+    pub fn get_compute_stage_entry(&self) -> Option<&String> {
+        self.compute_stage_entry.as_ref()
+    }
+
+    pub fn set_compute_stage_entry(&mut self, entry: String) -> &mut Self {
+        self.compute_stage_entry = Some(entry);
+        self
     }
 
     pub fn get_device_module(&self) -> Option<&wgpu::ShaderModule> {
@@ -978,14 +989,23 @@ impl FAttachment {
 }
 
 #[derive(Clone)]
-pub struct FPass {
+pub struct FGraphicsPass {
     uniform_view: FBufferView,
 
     color_attachments: Vec<FAttachment>,
     depth_stencil_attachment: Option<FAttachment>,
 }
 
-impl Default for FPass {
+#[derive(Clone)]
+pub struct FComputePass {}
+
+impl Default for FComputePass {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
+impl Default for FGraphicsPass {
     fn default() -> Self {
         Self {
             uniform_view: FBufferView::new_uniform(FBuffer::new_and_manage(BBufferUsages::Uniform)),
@@ -995,7 +1015,7 @@ impl Default for FPass {
     }
 }
 
-impl FPass {
+impl FGraphicsPass {
     pub fn new(uniform_view: FBufferView) -> Self {
         Self {
             uniform_view,
@@ -1319,7 +1339,7 @@ impl FRenderObject {
             .update_by_struct(&uniform_struct);
     }
 
-    pub fn encode(&self, encoder: &mut FPassEncoder, shader_profile: &str) {
+    pub fn encode(&self, encoder: &mut FGraphicsPassEncoder, shader_profile: &str) {
         let mesh = self.model.mesh.borrow();
         let material = self.model.material.borrow();
 

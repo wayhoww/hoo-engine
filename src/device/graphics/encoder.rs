@@ -24,7 +24,7 @@ impl FPipeline {
     // ensure pass exists in encoder!
     fn create_device_resource_with_pass(
         &mut self,
-        pass_encoder: &mut FPassEncoder,
+        pass_encoder: &mut FGraphicsPassEncoder,
         vertex_entries: &[FVertexEntry],
         shader_module: &RcMut<FShaderModule>,
     ) -> wgpu::RenderPipeline {
@@ -212,7 +212,7 @@ impl FEditorRenderer {
         }
     }
 
-    pub fn get_pass(&self) -> FPass {
+    pub fn get_pass(&self) -> FGraphicsPass {
         let bg_color = hoo_engine()
             .borrow()
             .egui_context
@@ -221,7 +221,7 @@ impl FEditorRenderer {
             .visuals
             .extreme_bg_color;
 
-        let mut pass = FPass::new(self.pass_buffer_view.clone());
+        let mut pass = FGraphicsPass::new(self.pass_buffer_view.clone());
         pass.set_color_attachments(vec![FAttachment {
             texture_view: FTextureView::new_swapchain_view(),
             load_op: ELoadOp::Clear, // add a switch
@@ -297,7 +297,7 @@ impl FEditorRenderer {
 
     pub fn encode<'command_encoder, 'pass>(
         &'command_encoder mut self,
-        mut pass_encoder: FPassEncoder<'pass, '_>,
+        mut pass_encoder: FGraphicsPassEncoder<'pass, '_>,
     ) where
         'command_encoder: 'pass,
     {
@@ -360,13 +360,30 @@ pub struct FFrameEncoder<'command_encoder, 'device_encoder> {
     resources: &'command_encoder Vec<Ref<'command_encoder, dyn TGPUResource>>,
 }
 // paint_jobs
-pub struct FPassEncoder<'pass, 'device_encoder> {
+pub struct FGraphicsPassEncoder<'pass, 'device_encoder> {
     // access using a function
     encoder: &'device_encoder FDeviceEncoder,
 
     // keep them private
-    pass: FPass,
+    pass: FGraphicsPass,
     render_pass: wgpu::RenderPass<'pass>,
+    // 这些资源实际上的生命周期比 'pass 长
+    resources: &'pass Vec<Ref<'pass, dyn TGPUResource>>,
+
+    transient_resources_cache: &'pass bumpalo::Bump,
+    // render_pipeline_cache: &'command_encoder typed_arena::Arena<wgpu::RenderPipeline>,
+    // bind_group_cache: &'command_encoder typed_arena::Arena<wgpu::BindGroup>,
+    // egui_paint_jobs_cache: &'command_encoder typed_arena::Arena<Vec<egui::ClippedPrimitive>>  // 或许用 untyped 更好? 避免这边放一堆类型
+}
+
+// paint_jobs
+pub struct FComputePassEncoder<'pass, 'device_encoder> {
+    // access using a function
+    encoder: &'device_encoder FDeviceEncoder,
+
+    // keep them private
+    pass: FComputePass,
+    compute_pass: wgpu::ComputePass<'pass>,
     // 这些资源实际上的生命周期比 'pass 长
     resources: &'pass Vec<Ref<'pass, dyn TGPUResource>>,
 
@@ -624,17 +641,47 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
         self.encoder.uniform_buffer_view_task = Some(buffer);
     }
 
-    pub fn encode_render_pass<F: FnOnce(FPassEncoder)>(
+    pub fn encode_compute_pass(
         &mut self,
-        render_pass: FPass,
+        compute_pass: FComputePass,
+        pass_closure: impl FnOnce(FComputePassEncoder),
+    ) {
+        self.encode_compute_pass_with_argument(compute_pass, |a, _| pass_closure(a), ());
+    }
+
+    pub fn encode_compute_pass_with_argument<E, F: FnOnce(FComputePassEncoder, E)>(
+        &mut self,
+        compute_pass: FComputePass,
+        pass_closure: F,
+        extra_data: E,
+    ) {
+        let desc = wgpu::ComputePassDescriptor {
+            label: "Compute Pass".into(),
+        };
+
+        let pass = self.command_encoder.begin_compute_pass(&desc);
+        let transient_resources_cache = bumpalo::Bump::new();
+        let encoder = FComputePassEncoder {
+            encoder: &self.encoder,
+            pass: compute_pass,
+            compute_pass: pass,
+            resources: self.resources,
+            transient_resources_cache: &transient_resources_cache,
+        };
+        pass_closure(encoder, extra_data);
+    }
+
+    pub fn encode_render_pass<F: FnOnce(FGraphicsPassEncoder)>(
+        &mut self,
+        render_pass: FGraphicsPass,
         pass_closure: F,
     ) {
         self.encode_render_pass_with_argument(render_pass, |a, _| pass_closure(a), ());
     }
 
-    pub fn encode_render_pass_with_argument<E, F: FnOnce(FPassEncoder, E)>(
+    pub fn encode_render_pass_with_argument<E, F: FnOnce(FGraphicsPassEncoder, E)>(
         &mut self,
-        render_pass: FPass,
+        render_pass: FGraphicsPass,
         pass_closure: F,
         extra_data: E,
     ) {
@@ -693,7 +740,7 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
 
         let transient_resources_cache = bumpalo::Bump::new();
 
-        let pass_encoder = FPassEncoder {
+        let pass_encoder = FGraphicsPassEncoder {
             pass: render_pass,
             resources: self.resources,
             encoder: self.encoder,
@@ -710,7 +757,7 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
     }
 }
 
-impl<'command_encoder, 'device_encoder> FPassEncoder<'command_encoder, 'device_encoder> {
+impl<'command_encoder, 'device_encoder> FGraphicsPassEncoder<'command_encoder, 'device_encoder> {
     pub fn setup_pipeline(
         &mut self,
         vertex_entries: &[FVertexEntry],
@@ -817,5 +864,29 @@ impl<'command_encoder, 'device_encoder> FPassEncoder<'command_encoder, 'device_e
 
         self.render_pass
             .draw_indexed(0..draw_command.get_index_count() as u32, 0, 0..1);
+    }
+}
+
+impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
+    pub fn dispatch(&mut self, shader: &RcMut<FShaderModule>, group_count: (u32, u32, u32)) {
+        let shader_ref = shader.borrow();
+
+        let pipeline_desc = wgpu::ComputePipelineDescriptor {
+            label: "Compute Pipeline".into(),
+            layout: None,
+            module: shader_ref.get_device_module().unwrap(),
+            entry_point: shader_ref.get_compute_stage_entry().as_ref().unwrap(),
+        };
+        let pipeline = self
+            .encoder
+            .get_device()
+            .create_compute_pipeline(&pipeline_desc);
+        let pipeline = self.transient_resources_cache.alloc(pipeline);
+        self.compute_pass.set_pipeline(pipeline);
+        self.compute_pass
+            .dispatch_workgroups(group_count.0, group_count.1, group_count.2);
+        // self.encoder.get_device().create_compute_pipeline()
+        // self.encoder
+        // self.compute_pass.set_pipeline()
     }
 }
