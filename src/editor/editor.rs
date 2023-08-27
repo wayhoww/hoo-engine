@@ -24,7 +24,13 @@ impl FEditor {
             .resizable(true)
             .show(ctx, |ui| {
                 if let Some(tex) = self.main_viewport_texture.as_ref() {
-                    gctx.image(ui, tex);
+                    let image = gctx.image(ui, tex);
+
+                    if let Some(pointer_pos) = image.hover_pos() {
+                        let pointer_pos = (pointer_pos.x - image.rect.left(), image.rect.bottom() - pointer_pos.y);
+                        let pointer_uv = (pointer_pos.0 / image.rect.width(), pointer_pos.1 / image.rect.height());
+                        // println!("hover_pos: {:?}", pointer_uv);
+                    }
                 } else {
                     ui.label("No viewport texture");
                 }

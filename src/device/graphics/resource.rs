@@ -697,6 +697,12 @@ pub struct FBufferView {
     view_type: EBufferViewType,
 }
 
+impl Default for FBufferView {
+    fn default() -> Self {
+        return FBufferView::new_uniform(FBuffer::new_and_manage(BBufferUsages::Uniform));
+    }
+}
+
 impl FBufferView {
     pub fn new(buffer: RcMut<FBuffer>, offset: u64, size: u64, view_type: EBufferViewType) -> Self {
         let out = Self {
@@ -715,6 +721,11 @@ impl FBufferView {
     pub fn new_uniform(buffer: RcMut<FBuffer>) -> Self {
         let initial_size = buffer.borrow().size();
         Self::new(buffer, 0, initial_size, EBufferViewType::Uniform)
+    }
+
+    pub fn new_with_type(buffer: RcMut<FBuffer>, view_type: EBufferViewType) -> Self {
+        let initial_size = buffer.borrow().size();
+        Self::new(buffer, 0, initial_size, view_type)
     }
 
     pub fn check(&self) -> Result<(), String> {
@@ -925,6 +936,16 @@ pub enum FClearValue {
     Float(f32),
 }
 
+impl FClearValue {
+    pub fn new_float4(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self::Float4 { r, g, b, a }
+    }
+
+    pub fn new_float(x: f32) -> Self {
+        Self::Float(x)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FAttachment {
     pub texture_view: FTextureView,
@@ -943,6 +964,11 @@ impl FAttachment {
         }
     }
 
+    pub fn new_append_to_view(view: FTextureView) -> Self {
+        let attachment = Self::new(view, ELoadOp::Load, EStoreOp::Store);
+        return attachment;
+    }
+
     pub fn set_clear_value(&mut self, clear_value: FClearValue) -> &mut Self {
         // check: clear value vs texture format
         self.clear_value = clear_value;
@@ -956,6 +982,16 @@ pub struct FPass {
 
     color_attachments: Vec<FAttachment>,
     depth_stencil_attachment: Option<FAttachment>,
+}
+
+impl Default for FPass {
+    fn default() -> Self {
+        Self {
+            uniform_view: FBufferView::new_uniform(FBuffer::new_and_manage(BBufferUsages::Uniform)),
+            color_attachments: vec![],
+            depth_stencil_attachment: None,
+        }
+    }
 }
 
 impl FPass {

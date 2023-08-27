@@ -77,34 +77,34 @@ impl HContext {
         };
         space.entities.push(entity2);
 
-        let entity3 = {
-            let mut entity = HEntity::new();
-            let transform_component = HTransformComponent::new_face_at(
-                &glm::vec3(0.0, 5.0, 3.0),
-                &glm::vec3(0.0, 0.0, 0.0),
-                &glm::vec3(0.0, 0.0, 1.0),
-            );
-            entity.add_component(
-                COMPONENT_ID_TRANSFORM,
-                RcObject::new(transform_component).into_any(),
-            );
-            let mut camera = HCamera::new(super::objects::FCameraProjection::Perspective {
-                fov: 45.0f32.to_radians(),
-                aspect: 800.0 / 600.0,
-                near: 0.1,
-                far: 1000.0,
-            });
-            camera.target = HCameraTarget::Screen;
-            let camera_component = HCameraComponent {
-                camera: RcObject::new(camera),
-            };
-            entity.add_component(
-                COMPONENT_ID_CAMERA,
-                RcObject::new(camera_component).into_any(),
-            );
-            entity
-        };
-        space.entities.push(entity3);
+        // let entity3 = {
+        //     let mut entity = HEntity::new();
+        //     let transform_component = HTransformComponent::new_face_at(
+        //         &glm::vec3(0.0, 5.0, 3.0),
+        //         &glm::vec3(0.0, 0.0, 0.0),
+        //         &glm::vec3(0.0, 0.0, 1.0),
+        //     );
+        //     entity.add_component(
+        //         COMPONENT_ID_TRANSFORM,
+        //         RcObject::new(transform_component).into_any(),
+        //     );
+        //     let mut camera = HCamera::new(super::objects::FCameraProjection::Perspective {
+        //         fov: 45.0f32.to_radians(),
+        //         aspect: 800.0 / 600.0,
+        //         near: 0.1,
+        //         far: 1000.0,
+        //     });
+        //     camera.target = HCameraTarget::Screen;
+        //     let camera_component = HCameraComponent {
+        //         camera: RcObject::new(camera),
+        //     };
+        //     entity.add_component(
+        //         COMPONENT_ID_CAMERA,
+        //         RcObject::new(camera_component).into_any(),
+        //     );
+        //     entity
+        // };
+        // space.entities.push(entity3);
 
         let entity3 = {
             let mut entity = HEntity::new();

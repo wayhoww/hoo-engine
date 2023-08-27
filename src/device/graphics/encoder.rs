@@ -170,7 +170,7 @@ impl FEguiGraphicsContext<'_, '_, '_, '_> {
         uitex
     }
 
-    pub fn image_with_scale(&mut self, ui: &mut egui::Ui, texture: &RcMut<FTexture>, scale: f32) {
+    pub fn image_with_scale(&mut self, ui: &mut egui::Ui, texture: &RcMut<FTexture>, scale: f32) -> egui::Response {
         let uitex = self.register_texture_online(texture);
         let tex_ref = texture.borrow();
         ui.image(
@@ -179,10 +179,10 @@ impl FEguiGraphicsContext<'_, '_, '_, '_> {
                 tex_ref.get_width() as f32 * scale / self.editor_renderer.scale_factor,
                 tex_ref.get_height() as f32 * scale / self.editor_renderer.scale_factor,
             ],
-        );
+        )
     }
 
-    pub fn image(&mut self, ui: &mut egui::Ui, texture: &RcMut<FTexture>) {
+    pub fn image(&mut self, ui: &mut egui::Ui, texture: &RcMut<FTexture>) -> egui::Response {
         self.image_with_scale(ui, texture, 1.0)
     }
 }

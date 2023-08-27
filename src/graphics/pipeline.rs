@@ -6,10 +6,14 @@ use crate::{hoo_engine, utils::*};
 use nalgebra_glm as glm;
 
 use super::FPipelineContext;
+use super::affiliate::FCursorPass;
 
 pub struct FGraphicsPipeline {
     pass1: FPass,
     pass2: FPass,
+    cursor_pass: FCursorPass,
+
+    rt_color: FTextureView,
 
     uniform_view: FBufferView,
 
@@ -91,9 +95,11 @@ impl FGraphicsPipeline {
         Self {
             pass1,
             pass2,
+            cursor_pass: FCursorPass::new(),
             uniform_view,
             task_uniform_buffer,
             task_uniform_view,
+            rt_color: FTextureView::new_swapchain_view(),
         }
     }
 
@@ -132,6 +138,7 @@ impl FGraphicsPipeline {
         let size = match &context.render_target {
             crate::object::objects::HCameraTarget::Screen => {
                 let swapchain_image_view = FTextureView::new_swapchain_view();
+                self.rt_color = swapchain_image_view.clone();
 
                 self.pass1.set_color_attachments(vec![FAttachment::new(
                     swapchain_image_view.clone(),
@@ -160,6 +167,7 @@ impl FGraphicsPipeline {
                 //     BTextureUsages::Attachment | BTextureUsages::Sampled,
                 // );
                 let color_texture_view = FTextureView::new(tex.clone());
+                self.rt_color = color_texture_view.clone();
 
                 self.pass1.set_color_attachments(vec![FAttachment::new(
                     color_texture_view.clone(),
@@ -234,6 +242,10 @@ impl FGraphicsPipeline {
             for render_object in context.render_objects.iter() {
                 render_object.encode(&mut pass_encoder, "base");
             }
+        });
+
+        frame_encoder.encode_render_pass(self.cursor_pass.get_pass(self.rt_color.clone()), |mut pass_encoder| {
+            self.cursor_pass.encode_pass(&mut pass_encoder);
         });
 
         // frame_encoder.encode_render_pass(&self.pass2, |pass_encoder| {
