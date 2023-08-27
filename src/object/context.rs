@@ -68,6 +68,7 @@ impl HContext {
                         far: 1000.0,
                     },
                 )),
+                main_camera: true,
             };
             entity.add_component(
                 COMPONENT_ID_CAMERA,

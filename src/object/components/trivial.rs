@@ -60,6 +60,7 @@ impl HTransformComponent {
 
 pub struct HCameraComponent {
     pub camera: RcObject<objects::HCamera>,
+    pub main_camera: bool,
 }
 
 pub struct HLightComponent {

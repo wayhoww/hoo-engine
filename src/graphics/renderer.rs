@@ -30,14 +30,6 @@ impl Renderer {
 
     pub fn prepare(&mut self) {
         self.graphics_encoder.prepare();
-        let tex = FTexture::new_and_manage(
-            ETextureFormat::Bgra8UnormSrgb,
-            BTextureUsages::Attachment | BTextureUsages::Sampled,
-        );
-        tex.borrow_mut().set_size((800, 600));
-        self.main_viewport_texture = Some(tex);
-        hoo_engine().borrow().get_editor_mut().main_viewport_texture =
-            Some(self.main_viewport_texture.as_ref().unwrap().clone());
     }
 
     pub fn submit_pipeline(&self, pipeline_context: FPipelineContext) {
@@ -48,6 +40,22 @@ impl Renderer {
 
     // TODO: 定义几个时间点，如 begin_frame, begin_object_tick, begin_render_tick, end_render_tick, end_object_tick, end_frame
     pub fn next_frame(&mut self) {
+
+        let overlay_mode = hoo_engine().borrow().get_editor().get_state().overlay_mode;
+        if !overlay_mode && self.main_viewport_texture.is_none() {
+            let tex = FTexture::new_and_manage(
+                ETextureFormat::Bgra8UnormSrgb,
+                BTextureUsages::Attachment | BTextureUsages::Sampled,
+            );
+            tex.borrow_mut().set_size((800, 600));
+            self.main_viewport_texture = Some(tex);
+        }
+        if overlay_mode && self.main_viewport_texture.is_some() {
+            let _ = self.main_viewport_texture.take();
+        }
+        // 主动设置好还是让 editor 来获取好？  通常是 editor 来主动获取
+        hoo_engine().borrow().get_editor_mut().main_viewport_texture = self.main_viewport_texture.clone();
+
         self.graphics_context
             .borrow_mut()
             .encode(&mut self.graphics_encoder);

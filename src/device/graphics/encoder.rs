@@ -222,9 +222,10 @@ impl FEditorRenderer {
             .extreme_bg_color;
 
         let mut pass = FGraphicsPass::new(self.pass_buffer_view.clone());
+        let overlay_mode = hoo_engine().borrow().get_editor().get_state().overlay_mode;
         pass.set_color_attachments(vec![FAttachment {
             texture_view: FTextureView::new_swapchain_view(),
-            load_op: ELoadOp::Clear, // add a switch
+            load_op: if overlay_mode { ELoadOp::Load } else { ELoadOp::Clear }, 
             store_op: EStoreOp::Store,
             clear_value: FClearValue::Float4 {
                 r: bg_color.r() as f32 / 255.0,
@@ -256,7 +257,7 @@ impl FEditorRenderer {
 
         let egui_context = hoo_engine.get_egui_context_mut();
         egui_context.begin_frame(hoo_engine.take_egui_input());
-        hoo_engine.get_editor().draw(
+        hoo_engine.get_editor_mut().draw(
             &egui_context,
             FEguiGraphicsContext {
                 frame_encoder,
