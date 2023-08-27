@@ -1,7 +1,7 @@
 use crate::device::graphics::*;
 
 use crate::object::objects::FShaderLight;
-use crate::utils::*;
+use crate::{hoo_engine, utils::*};
 
 use nalgebra_glm as glm;
 
@@ -26,7 +26,7 @@ pub struct FTaskUnifromBuffer {
 }
 
 impl FGraphicsPipeline {
-    pub fn new<'a>(encoder: &FDeviceEncoder) -> Self {
+    pub fn new<'a>() -> Self {
         // faked
         let default_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
         default_uniform_buffer.borrow_mut().resize(1024);
@@ -39,30 +39,54 @@ impl FGraphicsPipeline {
             .resize(std::mem::size_of::<FShaderLight>() as u64);
         let task_uniform_view = FBufferView::new_uniform(task_uniform_buffer.clone());
 
-        // pass
-        let depth_texture = FTexture::new_and_manage(
-            ETextureFormat::Depth24PlusStencil8,
-            BTextureUsages::Attachment,
-        );
-        depth_texture
-            .borrow_mut()
-            .set_size(encoder.get_swapchain_size());
-        let depth_texture_view = FTextureView::new(depth_texture.clone());
+        // // pass
+        // let size = (512, 512);
 
-        let mut pass1 = FPass::new(uniform_view.clone());
-        let mut pass2 = FPass::new(uniform_view.clone());
-        pass1.set_depth_stencil_attachment(FAttachment {
-            texture_view: depth_texture_view.clone(),
-            load_op: ELoadOp::Clear,
-            store_op: EStoreOp::Discard,
-            clear_value: FClearValue::Float(1f32),
-        });
-        pass2.set_depth_stencil_attachment(FAttachment {
-            texture_view: depth_texture_view.clone(),
-            load_op: ELoadOp::Clear,
-            store_op: EStoreOp::Discard,
-            clear_value: FClearValue::Float(1f32),
-        });
+        // let color_texture = FTexture::new_and_manage(
+        //     ETextureFormat::Bgra8Unorm,
+        //     BTextureUsages::Attachment | BTextureUsages::Sampled,
+        // );
+        // color_texture.borrow_mut().set_size(size);
+        // hoo_engine().borrow().get_editor_mut().main_viewport_texture = Some(color_texture.clone());
+        // let color_texture_view = FTextureView::new(color_texture.clone());
+
+        // let depth_texture = FTexture::new_and_manage(
+        //     ETextureFormat::Depth24PlusStencil8,
+        //     BTextureUsages::Attachment,
+        // );
+        // depth_texture.borrow_mut().set_size(size);
+        // let depth_texture_view = FTextureView::new(depth_texture.clone());
+
+        let pass1 = FPass::new(uniform_view.clone());
+        let pass2 = FPass::new(uniform_view.clone());
+
+        // pass1.set_depth_stencil_attachment(FAttachment {
+        //     texture_view: depth_texture_view.clone(),
+        //     load_op: ELoadOp::Clear,
+        //     store_op: EStoreOp::Discard,
+        //     clear_value: FClearValue::Float(1f32),
+        // });
+        // let mut color_attachment =
+        //     FAttachment::new(color_texture_view.clone(), ELoadOp::Clear, EStoreOp::Store);
+        // color_attachment.set_clear_value(FClearValue::Float4 {
+        //     r: 0.1,
+        //     g: 0.0,
+        //     b: 0.1,
+        //     a: 1.0,
+        // });
+        // pass1.set_color_attachments(vec![color_attachment]);
+
+        // pass2.set_depth_stencil_attachment(FAttachment {
+        //     texture_view: depth_texture_view.clone(),
+        //     load_op: ELoadOp::Clear,
+        //     store_op: EStoreOp::Discard,
+        //     clear_value: FClearValue::Float(1f32),
+        // });
+        // pass2.set_color_attachments(vec![FAttachment::new(
+        //     color_texture_view.clone(),
+        //     ELoadOp::Load,
+        //     EStoreOp::Store,
+        // )]);
 
         Self {
             pass1,
@@ -73,7 +97,7 @@ impl FGraphicsPipeline {
         }
     }
 
-    pub fn draw(&mut self, encoder: &mut FDeviceEncoder, context: &mut FPipelineContext) {
+    pub fn prepare(&mut self, context: &mut FPipelineContext) {
         let mat_view = {
             let camera_rotation: glm::Mat4 =
                 glm::make_mat3(&[-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0]).to_homogeneous();
@@ -97,11 +121,7 @@ impl FGraphicsPipeline {
             .borrow_mut()
             .update_by_struct(&task_uniform_buffer_data);
 
-        encoder.set_global_uniform_buffer_view(self.uniform_view.clone());
-        encoder.set_task_uniform_buffer_view(self.task_uniform_view.clone());
-
-        let mut render_objects = context.render_objects.clone();
-        for render_object in render_objects.iter_mut() {
+        for render_object in context.render_objects.iter_mut() {
             // 这个混在一起会不会有些奇怪。以后这类问题可以看看其他引擎的做法
             render_object
                 .set_transform_view(mat_view)
@@ -109,39 +129,116 @@ impl FGraphicsPipeline {
                 .update_uniform_buffer();
         }
 
-        encoder.encode_frame(|frame_encoder| {
-            let swapchain_image_view = FTextureView::new_swapchain_view();
+        let size = match &context.render_target {
+            crate::object::objects::HCameraTarget::Screen => {
+                let swapchain_image_view = FTextureView::new_swapchain_view();
 
-            self.pass1.set_color_attachments(vec![FAttachment::new(
-                swapchain_image_view.clone(),
-                ELoadOp::Clear,
-                EStoreOp::Store,
-            )
-            .set_clear_value(FClearValue::Float4 {
-                r: 0.1,
-                g: 0.0,
-                b: 0.1,
-                a: 1.0,
-            })
-            .clone()]);
+                self.pass1.set_color_attachments(vec![FAttachment::new(
+                    swapchain_image_view.clone(),
+                    ELoadOp::Clear,
+                    EStoreOp::Store,
+                )
+                .set_clear_value(FClearValue::Float4 {
+                    r: 0.1,
+                    g: 0.0,
+                    b: 0.1,
+                    a: 1.0,
+                })
+                .clone()]);
 
-            self.pass2.set_color_attachments(vec![FAttachment::new(
-                swapchain_image_view.clone(),
-                ELoadOp::Load,
-                EStoreOp::Store,
-            )]);
+                self.pass2.set_color_attachments(vec![FAttachment::new(
+                    swapchain_image_view.clone(),
+                    ELoadOp::Load,
+                    EStoreOp::Store,
+                )]);
 
-            frame_encoder.encode_render_pass(self.pass1.clone(), |mut pass_encoder| {
-                // self.render_object1.encode(pass_encoder, "base");
+                // context.
+            }
+            crate::object::objects::HCameraTarget::Texture(tex) => {
+                // let color_texture = FTexture::new_and_manage(
+                //     ETextureFormat::Bgra8Unorm,
+                //     BTextureUsages::Attachment | BTextureUsages::Sampled,
+                // );
+                let color_texture_view = FTextureView::new(tex.clone());
 
-                for render_object in render_objects.iter() {
-                    render_object.encode(&mut pass_encoder, "base");
-                }
-            });
+                self.pass1.set_color_attachments(vec![FAttachment::new(
+                    color_texture_view.clone(),
+                    ELoadOp::Clear,
+                    EStoreOp::Store,
+                )
+                .set_clear_value(FClearValue::Float4 {
+                    r: 0.1,
+                    g: 0.0,
+                    b: 0.1,
+                    a: 1.0,
+                })
+                .clone()]);
 
-            // frame_encoder.encode_render_pass(&self.pass2, |pass_encoder| {
-            //     self.render_object2.encode(pass_encoder, "base");
-            // });
+                self.pass2.set_color_attachments(vec![FAttachment::new(
+                    color_texture_view.clone(),
+                    ELoadOp::Load,
+                    EStoreOp::Store,
+                )]);
+            }
+        };
+
+        let depth_stencil_texture = FTexture::new_and_manage(
+            ETextureFormat::Depth24PlusStencil8,
+            BTextureUsages::Attachment,
+        );
+
+        depth_stencil_texture.borrow_mut().set_size(context.render_target_size);
+        let depth_stencil_texture_view = FTextureView::new(depth_stencil_texture.clone());
+        self.pass1.set_depth_stencil_attachment(FAttachment {
+            texture_view: depth_stencil_texture_view.clone(),
+            load_op: ELoadOp::Clear,
+            store_op: EStoreOp::Discard,
+            clear_value: FClearValue::Float(1f32),
         });
+        self.pass2.set_depth_stencil_attachment(FAttachment {
+            texture_view: depth_stencil_texture_view.clone(),
+            load_op: ELoadOp::Clear,
+            store_op: EStoreOp::Discard,
+            clear_value: FClearValue::Float(1f32),
+        });
+    }
+
+    pub fn draw(&mut self, frame_encoder: &mut FFrameEncoder, context: &mut FPipelineContext) {
+        // encoder.encode_frame(|frame_encoder| {
+        // let swapchain_image_view = FTextureView::new_swapchain_view();
+
+        // self.pass1.set_color_attachments(vec![FAttachment::new(
+        //     swapchain_image_view.clone(),
+        //     ELoadOp::Clear,
+        //     EStoreOp::Store,
+        // )
+        // .set_clear_value(FClearValue::Float4 {
+        //     r: 0.1,
+        //     g: 0.0,
+        //     b: 0.1,
+        //     a: 1.0,
+        // })
+        // .clone()]);
+
+        // self.pass2.set_color_attachments(vec![FAttachment::new(
+        //     swapchain_image_view.clone(),
+        //     ELoadOp::Load,
+        //     EStoreOp::Store,
+        // )]);
+
+        frame_encoder.set_task_uniform_buffer_view(self.task_uniform_view.clone());
+
+        frame_encoder.encode_render_pass(self.pass1.clone(), |mut pass_encoder| {
+            // self.render_object1.encode(pass_encoder, "base");
+
+            for render_object in context.render_objects.iter() {
+                render_object.encode(&mut pass_encoder, "base");
+            }
+        });
+
+        // frame_encoder.encode_render_pass(&self.pass2, |pass_encoder| {
+        //     self.render_object2.encode(pass_encoder, "base");
+        // });
+        // });
     }
 }

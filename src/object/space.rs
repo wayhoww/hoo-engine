@@ -43,6 +43,7 @@ impl HSpace {
         }
 
         for system in self.systems.iter() {
+            system.borrow_mut().before_first_tick(self, delta_time);
             for entity in self.entities.iter() {
                 let mut components: Vec<RcAny> = Vec::new();
                 for interested_component in system.borrow().get_interested_components() {

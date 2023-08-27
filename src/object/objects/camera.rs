@@ -1,3 +1,5 @@
+use crate::{device::graphics::FTexture, hoo_engine, utils::RcMut};
+
 #[derive(Clone)]
 pub enum FCameraProjection {
     Perspective {
@@ -69,13 +71,33 @@ impl FCameraProjection {
     }
 }
 
+#[derive(Clone, Default)]
+pub enum HCameraTarget {
+    #[default]
+    Screen,
+    Texture(RcMut<FTexture>),
+}
+
 pub struct HCamera {
     pub camera_projection: FCameraProjection,
+    pub auto_aspect: bool,
+    pub target: HCameraTarget,
 }
 
 impl HCamera {
     pub fn new(camera_projection: FCameraProjection) -> Self {
-        Self { camera_projection }
+        Self {
+            camera_projection,
+            auto_aspect: true,
+            target: hoo_engine()
+                .borrow()
+                .get_renderer()
+                .get_main_viewport_target(),
+        }
+    }
+
+    pub fn set_target(&mut self, target: HCameraTarget) {
+        self.target = target;
     }
 
     pub fn get_projection_matrix(&self) -> nalgebra_glm::Mat4 {

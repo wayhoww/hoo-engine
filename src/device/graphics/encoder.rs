@@ -146,12 +146,45 @@ enum EUniformBufferType {
 
 pub struct FEditorRenderer {
     window: RcMut<winit::window::Window>,
-    time: std::time::Instant,
 
     egui_renderer: egui_wgpu::Renderer,
     pass_buffer_view: FBufferView,
 
-    frame_data: Option<(Vec<egui::ClippedPrimitive>, egui::FullOutput)>
+    frame_data: Option<(Vec<egui::ClippedPrimitive>, egui::FullOutput)>,
+    user_textures: Vec<egui::TextureId>,
+
+    scale_factor: f32,
+}
+
+pub struct FEguiGraphicsContext<'frame_encoder, 'command_encoder, 'device_encoder, 'editor_renderer>
+{
+    frame_encoder: &'frame_encoder mut FFrameEncoder<'command_encoder, 'device_encoder>,
+    editor_renderer: &'editor_renderer mut FEditorRenderer,
+}
+
+impl FEguiGraphicsContext<'_, '_, '_, '_> {
+    pub fn register_texture_online(&mut self, texture: &RcMut<FTexture>) -> egui::TextureId {
+        let uitex = self
+            .editor_renderer
+            .register_texture_online(FTextureView::new(texture.clone()), self.frame_encoder);
+        uitex
+    }
+
+    pub fn image_with_scale(&mut self, ui: &mut egui::Ui, texture: &RcMut<FTexture>, scale: f32) {
+        let uitex = self.register_texture_online(texture);
+        let tex_ref = texture.borrow();
+        ui.image(
+            uitex,
+            [
+                tex_ref.get_width() as f32 * scale / self.editor_renderer.scale_factor,
+                tex_ref.get_height() as f32 * scale / self.editor_renderer.scale_factor,
+            ],
+        );
+    }
+
+    pub fn image(&mut self, ui: &mut egui::Ui, texture: &RcMut<FTexture>) {
+        self.image_with_scale(ui, texture, 1.0)
+    }
 }
 
 impl FEditorRenderer {
@@ -162,12 +195,13 @@ impl FEditorRenderer {
     ) -> Self {
         Self {
             window: window.clone(),
-            time: std::time::Instant::now(),
+            user_textures: vec![],
             frame_data: None,
             egui_renderer: egui_wgpu::Renderer::new(device, surface_format, None, 1),
             pass_buffer_view: FBufferView::new_uniform(FBuffer::new_and_manage(
                 BBufferUsages::Uniform,
             )),
+            scale_factor: window.borrow().scale_factor() as f32,
         }
     }
 
@@ -177,24 +211,49 @@ impl FEditorRenderer {
             texture_view: FTextureView::new_swapchain_view(),
             load_op: ELoadOp::Load,
             store_op: EStoreOp::Store,
-            clear_value: FClearValue::Float4{r: 0.0, g: 0.0, b: 0.0, a: 1.0},
+            clear_value: FClearValue::Float4 {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
         }]);
         pass
     }
 
-    pub fn prepare(&mut self, frame_encoder: &mut FFrameEncoder) {
+    pub fn register_texture_online(
+        &mut self,
+        texture: FTextureView,
+        frame_encoder: &mut FFrameEncoder,
+    ) -> egui::TextureId {
+        let out = self.egui_renderer.register_native_texture(
+            &frame_encoder.encoder.device,
+            &texture.get_device_texture_view(&frame_encoder.encoder),
+            wgpu::FilterMode::Linear,
+        );
+        self.user_textures.push(out);
+        out
+    }
 
+    pub fn prepare(&mut self, frame_encoder: &mut FFrameEncoder) {
         let hoo_engine_rc = hoo_engine();
         let hoo_engine = hoo_engine_rc.borrow();
 
         let egui_context = hoo_engine.get_egui_context_mut();
         egui_context.begin_frame(hoo_engine.take_egui_input());
-        hoo_engine.get_editor().draw(&egui_context);
+        hoo_engine.get_editor().draw(
+            &egui_context,
+            FEguiGraphicsContext {
+                frame_encoder,
+                editor_renderer: self,
+            },
+        );
         let full_output = egui_context.end_frame();
         let paint_jobs = egui_context.tessellate(full_output.shapes.clone());
 
         let scale_factor = self.window.borrow().scale_factor() as f32;
         let size = frame_encoder.encoder.get_swapchain_size();
+        self.scale_factor = scale_factor;
 
         let descriptor = egui_wgpu::renderer::ScreenDescriptor {
             size_in_pixels: [size.0, size.1],
@@ -202,9 +261,14 @@ impl FEditorRenderer {
         };
 
         for tex in full_output.textures_delta.set.iter() {
-            self.egui_renderer.update_texture(&frame_encoder.encoder.device, &frame_encoder.encoder.queue, tex.0, &tex.1);
+            self.egui_renderer.update_texture(
+                &frame_encoder.encoder.device,
+                &frame_encoder.encoder.queue,
+                tex.0,
+                &tex.1,
+            );
         }
-        
+
         self.egui_renderer.update_buffers(
             &frame_encoder.encoder.device,
             &frame_encoder.encoder.queue,
@@ -218,9 +282,10 @@ impl FEditorRenderer {
 
     pub fn encode<'command_encoder, 'pass>(
         &'command_encoder mut self,
-        mut pass_encoder: FPassEncoder<'pass, '_>
-    ) where 'command_encoder: 'pass {
-
+        mut pass_encoder: FPassEncoder<'pass, '_>,
+    ) where
+        'command_encoder: 'pass,
+    {
         let scale_factor = self.window.borrow().scale_factor() as f32;
         let size = pass_encoder.encoder.get_swapchain_size();
         let descriptor = egui_wgpu::renderer::ScreenDescriptor {
@@ -231,15 +296,22 @@ impl FEditorRenderer {
         let frame_data = self.frame_data.clone().unwrap();
 
         let paint_jobs = pass_encoder.transient_resources_cache.alloc(frame_data.0);
-        self.egui_renderer.render(&mut pass_encoder.render_pass, paint_jobs, &descriptor);
+        self.egui_renderer
+            .render(&mut pass_encoder.render_pass, paint_jobs, &descriptor);
     }
 
     pub fn free(&mut self) {
         let frame_data = self.frame_data.take().unwrap();
-        
+
         for tex in frame_data.1.textures_delta.free {
             self.egui_renderer.free_texture(&tex);
         }
+
+        for tex in self.user_textures.iter() {
+            self.egui_renderer.free_texture(tex);
+        }
+
+        self.user_textures.clear();
     }
 }
 
@@ -259,6 +331,7 @@ pub struct FDeviceEncoder {
 
     uniform_buffer_view_global: Option<FBufferView>,
     uniform_buffer_view_task: Option<FBufferView>,
+    default_uniform_buffer_view: Option<FBufferView>,
 
     editor: Option<RcMut<FEditorRenderer>>,
     window: RcMut<winit::window::Window>,
@@ -296,6 +369,14 @@ impl FDeviceEncoder {
 
     pub fn get_queue(&self) -> &wgpu::Queue {
         &self.queue
+    }
+
+    pub fn get_editor_renderer_ref(&self) -> Ref<FEditorRenderer> {
+        self.editor.as_ref().unwrap().borrow()
+    }
+
+    pub fn get_editor_renderer_mut(&self) -> RefMut<FEditorRenderer> {
+        self.editor.as_ref().unwrap().borrow_mut()
     }
 
     pub fn get_swapchain_texture(&self) -> Ref<Option<wgpu::SurfaceTexture>> {
@@ -410,6 +491,8 @@ impl FDeviceEncoder {
             bind_group_layouts,
             uniform_buffer_view_global: None,
             uniform_buffer_view_task: None,
+            default_uniform_buffer_view: None,
+
             editor: None,
             window: window.clone(),
         }
@@ -418,6 +501,14 @@ impl FDeviceEncoder {
     pub fn prepare(&mut self) {
         let editor = FEditorRenderer::new(&self.window, &self.device, self.swapchain_format.into());
         self.editor = Some(rcmut!(editor));
+
+        self.default_uniform_buffer_view = Some(FBufferView::new_uniform(FBuffer::new_and_manage(
+            BBufferUsages::Uniform,
+        )));
+
+        self.set_global_uniform_buffer_view(
+            self.default_uniform_buffer_view.as_ref().unwrap().clone(),
+        );
     }
 
     pub fn get_swapchain_size(&self) -> (u32, u32) {
@@ -464,10 +555,6 @@ impl FDeviceEncoder {
         self.uniform_buffer_view_global = Some(buffer);
     }
 
-    pub fn set_task_uniform_buffer_view(&mut self, buffer: FBufferView) {
-        self.uniform_buffer_view_task = Some(buffer);
-    }
-
     pub fn encode_frame<F: FnOnce(&mut FFrameEncoder)>(&mut self, frame_closure: F) {
         let command_encoder = self
             .device
@@ -491,7 +578,7 @@ impl FDeviceEncoder {
                 resources: &res_ref,
             };
             frame_closure(&mut frame_encoder);
-        
+
             let mut editor = editor.borrow_mut();
             let pass = editor.get_pass();
 
@@ -518,6 +605,10 @@ impl FDeviceEncoder {
 }
 
 impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_encoder> {
+    pub fn set_task_uniform_buffer_view(&mut self, buffer: FBufferView) {
+        self.encoder.uniform_buffer_view_task = Some(buffer);
+    }
+
     pub fn encode_render_pass<F: FnOnce(FPassEncoder)>(
         &mut self,
         render_pass: FPass,
@@ -530,7 +621,7 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
         &mut self,
         render_pass: FPass,
         pass_closure: F,
-        extra_data: E
+        extra_data: E,
     ) {
         let color_attachments_views: Vec<_> = render_pass
             .get_color_attachments()
@@ -593,7 +684,7 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
             encoder: self.encoder,
             render_pass: pass,
 
-            transient_resources_cache: &transient_resources_cache
+            transient_resources_cache: &transient_resources_cache,
         };
 
         pass_closure(pass_encoder, extra_data);

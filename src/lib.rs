@@ -14,7 +14,8 @@ use utils::RcMut;
 
 use std::{
     cell::{Ref, RefCell, RefMut},
-    rc::Rc, ops::Deref,
+    ops::Deref,
+    rc::Rc,
 };
 
 use crate::graphics::Renderer;
@@ -73,7 +74,7 @@ impl HooEngine {
             egui_context: context,
             egui_winit_state: RefCell::new(egui_winit_state),
             object_context: RcObject::new(HContext::new()),
-            window: window.clone()
+            window: window.clone(),
         };
         rcmut!(out)
     }
@@ -127,24 +128,23 @@ impl HooEngine {
         self.egui_context.borrow_mut()
     }
 
-    // pub fn get_egui_winit_state(&self) -> Ref<egui_winit::State> {
-    //     self.egui_winit_state.borrow()
-    // }
-
-    // pub fn get_egui_winit_state_mut(&self) -> RefMut<egui_winit::State> {
-    //     self.egui_winit_state.borrow_mut()
-    // }
-
     pub fn take_egui_input(&self) -> egui::RawInput {
-        self.egui_winit_state.borrow_mut().take_egui_input(self.window.borrow().deref())
+        self.egui_winit_state
+            .borrow_mut()
+            .take_egui_input(self.window.borrow().deref())
     }
 
     pub fn receive_event(&self, event: &winit::event::Event<()>) {
-
         match event {
-            winit::event::Event::WindowEvent { window_id: _, event } => {
-                let _ = self.egui_winit_state.borrow_mut().on_event(&self.get_egui_context(), event);
-            },
+            winit::event::Event::WindowEvent {
+                window_id: _,
+                event,
+            } => {
+                let _ = self
+                    .egui_winit_state
+                    .borrow_mut()
+                    .on_event(&self.get_egui_context(), event);
+            }
             _ => {}
         }
     }

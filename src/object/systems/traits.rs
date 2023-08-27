@@ -7,6 +7,7 @@ pub trait TSystem {
     fn get_interested_components(&self) -> &'static [u32];
 
     fn begin_frame(&mut self, _space: &HSpace) {}
-    fn end_frame(&mut self, _space: &HSpace) {}
+    fn before_first_tick(&mut self, _space: &HSpace, _delta_time: f64) {}
     fn tick_entity(&mut self, space: &HSpace, delta_time: f64, components: Vec<RcAny>);
+    fn end_frame(&mut self, _space: &HSpace) {}
 }

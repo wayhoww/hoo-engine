@@ -4,7 +4,7 @@ use hoo_object::RcObject;
 
 use crate::{
     hoo_engine,
-    object::{components::*, space::HSpace},
+    object::{components::*, objects::HCamera, space::HSpace},
 };
 
 use super::HGraphicsSystem;
@@ -18,12 +18,12 @@ use super::HGraphicsSystem;
 // 给 CameraComponent 增加一个字段，用于存储相机产物（没有产物 / 一个贴图）
 
 pub struct HCameraSystem {
-    found: bool,
+    pub cameras: Vec<(RcObject<HCamera>, nalgebra_glm::Mat4x4)>,
 }
 
 impl HCameraSystem {
     pub fn new() -> Self {
-        Self { found: false }
+        Self { cameras: vec![] }
     }
 }
 
@@ -42,48 +42,49 @@ impl super::traits::TSystem for HCameraSystem {
 
         let camera: RcObject<HCameraComponent> = components[1].clone().try_downcast().unwrap();
         let camera_ref = camera.borrow();
-        let camera_desc = camera_ref.camera.borrow();
+        // let camera_desc = camera_ref.camera.borrow();
 
-        if self.found {
-            todo!("log error here");
-        } else {
-            self.found = true;
-            // TODO: multiple viewport in a same space
-            let graphics_systems = space.get_systems_by_type::<HGraphicsSystem>();
+        self.cameras.push((
+            camera_ref.camera.clone(),
+            transform_ref.get_matrix_ignoring_scale(),
+        ));
 
-            for sys in graphics_systems {
-                let transform_mat = transform_ref.get_matrix_ignoring_scale();
-                let projection_mat = {
-                    let mut proj = camera_desc.camera_projection.clone();
-                    if camera_ref.auto_aspect {
-                        let swapchain_size =
-                            hoo_engine().borrow().get_renderer().get_swapchain_size();
-                        let aspect_ratio = 1.0 * swapchain_size.0 as f32 / swapchain_size.1 as f32;
-                        proj.set_aspect_ratio(aspect_ratio);
-                    }
-                    proj.get_projection_matrix()
-                };
+        // if self.found {
+        //     todo!("log error here");
+        // } else {
+        //     self.found = true;
+        // TODO: multiple viewport in a same space
+        // let graphics_systems = space.get_systems_by_type::<HGraphicsSystem>();
 
-                let mut sys_ref = sys.borrow_mut();
-                sys_ref
-                    .get_context_mut()
-                    .set_camera_transform(transform_mat);
-                sys_ref
-                    .get_context_mut()
-                    .set_camera_projection(projection_mat);
-            }
-        }
+        // for sys in graphics_systems {
+        //     let transform_mat = transform_ref.get_matrix_ignoring_scale();
+        //     let projection_mat = {
+        //         let mut proj = camera_desc.camera_projection.clone();
+        //         if camera_ref.auto_aspect {
+        //             let swapchain_size =
+        //                 hoo_engine().borrow().get_renderer().get_swapchain_size();
+        //             let aspect_ratio = 1.0 * swapchain_size.0 as f32 / swapchain_size.1 as f32;
+        //             proj.set_aspect_ratio(aspect_ratio);
+        //         }
+        //         proj.get_projection_matrix()
+        //     };
+
+        //     let mut sys_ref = sys.borrow_mut();
+        //     sys_ref
+        //         .get_context_mut()
+        //         .set_camera_transform(transform_mat);
+        //     sys_ref
+        //         .get_context_mut()
+        //         .set_camera_projection(projection_mat);
+        // }
+        // }
     }
 
     fn begin_frame(&mut self, _: &HSpace) {
-        self.found = false;
+        self.cameras.clear();
     }
 
-    fn end_frame(&mut self, _: &HSpace) {
-        if !self.found {
-            todo!("log error here");
-        }
-    }
+    fn end_frame(&mut self, _: &HSpace) {}
 
     fn get_interested_components(&self) -> &'static [u32] {
         &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_CAMERA]

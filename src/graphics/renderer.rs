@@ -1,5 +1,5 @@
-use crate::device::graphics::*;
 use crate::*;
+use crate::{device::graphics::*, object::objects::HCameraTarget};
 
 use super::{FGraphicsContext, FPipelineContext};
 
@@ -10,6 +10,7 @@ pub struct Renderer {
     // uniform_buffer: FBuffer,
     // model: Option<FModel>,
     // pass: Option<FPass>,
+    main_viewport_texture: Option<RcMut<FTexture>>,
 }
 
 impl Renderer {
@@ -19,6 +20,7 @@ impl Renderer {
         Self {
             graphics_encoder,
             graphics_context: RefCell::new(FGraphicsContext::new()),
+            main_viewport_texture: None,
         }
     }
 
@@ -28,6 +30,14 @@ impl Renderer {
 
     pub fn prepare(&mut self) {
         self.graphics_encoder.prepare();
+        let tex = FTexture::new_and_manage(
+            ETextureFormat::Bgra8UnormSrgb,
+            BTextureUsages::Attachment | BTextureUsages::Sampled,
+        );
+        tex.borrow_mut().set_size((800, 600));
+        self.main_viewport_texture = Some(tex);
+        hoo_engine().borrow().get_editor_mut().main_viewport_texture =
+            Some(self.main_viewport_texture.as_ref().unwrap().clone());
     }
 
     pub fn submit_pipeline(&self, pipeline_context: FPipelineContext) {
@@ -46,5 +56,21 @@ impl Renderer {
 
     pub fn get_swapchain_size(&self) -> (u32, u32) {
         self.graphics_encoder.get_swapchain_size()
+    }
+
+    pub fn get_editor_renderer_ref(&self) -> Ref<FEditorRenderer> {
+        self.graphics_encoder.get_editor_renderer_ref()
+    }
+
+    pub fn get_editor_renderer_mut(&self) -> RefMut<FEditorRenderer> {
+        self.graphics_encoder.get_editor_renderer_mut()
+    }
+
+    pub fn get_main_viewport_target(&self) -> HCameraTarget {
+        if let Some(tex) = &self.main_viewport_texture {
+            HCameraTarget::Texture(tex.clone())
+        } else {
+            HCameraTarget::Screen
+        }
     }
 }

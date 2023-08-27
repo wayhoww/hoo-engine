@@ -5,8 +5,9 @@
 use nalgebra_glm as glm;
 
 use crate::{
-    device::graphics::{FDeviceEncoder, FRenderObject},
-    object::objects::FShaderLight,
+    device::graphics::{FDeviceEncoder, FFrameEncoder, FRenderObject},
+    hoo_engine,
+    object::objects::{FShaderLight, HCameraTarget},
 };
 
 use super::FGraphicsPipeline;
@@ -15,11 +16,16 @@ pub struct FGraphicsContext {
     pipelines: Vec<FPipelineContext>,
 }
 
+#[derive(Default, Clone)]
 pub struct FPipelineContext {
     pub camera_projection: glm::Mat4,
     pub camera_transform: glm::Mat4,
+
     pub render_objects: Vec<FRenderObject>,
     pub lights: Vec<FShaderLight>,
+
+    pub render_target: HCameraTarget,
+    pub render_target_size: (u32, u32),
 }
 
 impl FGraphicsContext {
@@ -32,9 +38,19 @@ impl FGraphicsContext {
     }
 
     pub fn encode(&mut self, encoder: &mut FDeviceEncoder) {
-        for pipeline in self.pipelines.iter_mut() {
-            pipeline.encode(encoder)
+        let mut pipeline_encoders = vec![]; // TODO: 支持不同种类的 pipeline
+        for ctx in self.pipelines.iter_mut() {
+            let mut pipeline_encoder = FGraphicsPipeline::new();
+            pipeline_encoder.prepare(ctx);
+            pipeline_encoders.push(pipeline_encoder);
         }
+
+        encoder.encode_frame(|frame_encoder| {
+            for pipeline in self.pipelines.iter_mut().zip(pipeline_encoders.iter_mut()) {
+                let (pipeline_context, pipeline_encoder) = pipeline;
+                pipeline_encoder.draw(frame_encoder, pipeline_context);
+            }
+        });
 
         self.pipelines.clear()
     }
@@ -51,6 +67,8 @@ impl FPipelineContext {
             ),
             render_objects: Vec::new(),
             lights: Vec::new(),
+            render_target: HCameraTarget::default(),
+            render_target_size: (0, 0),
         }
     }
 
@@ -70,8 +88,16 @@ impl FPipelineContext {
         self.lights = lights;
     }
 
-    pub fn encode(&mut self, encoder: &mut FDeviceEncoder) {
-        let mut pipeline = FGraphicsPipeline::new(encoder);
-        pipeline.draw(encoder, self);
+    pub fn set_render_target(&mut self, render_target: HCameraTarget) {
+        self.render_target = render_target;
+        match &self.render_target {
+            HCameraTarget::Texture(tex) => {
+                let size = tex.borrow().size();
+                self.render_target_size = size;
+            }
+            HCameraTarget::Screen => {
+                self.render_target_size = hoo_engine().borrow().get_renderer().get_swapchain_size();
+            }
+        }
     }
 }

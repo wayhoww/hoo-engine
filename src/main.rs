@@ -11,6 +11,7 @@ pub fn run() {
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
+    window.set_inner_size(winit::dpi::PhysicalSize::new(1920, 1080));
     let window = rcmut!(window);
 
     let hoo_engine = HooEngine::new_async(&window);
