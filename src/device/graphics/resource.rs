@@ -1,7 +1,8 @@
 use bitflags::bitflags;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use wgpu;
+
+use egui_wgpu::wgpu as wgpu;
 
 use crate::io::resource::*;
 use crate::utils::*;

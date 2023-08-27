@@ -36,20 +36,23 @@ v8 = "0.75.0"
 nalgebra = "0.32.3"
 chrono = "0.4.26"
 bumpalo = "3.13.0"
+egui = "0.22.0"
+egui-wgpu = "0.22.0"
+egui-winit = "0.22.0"
 
 # egui_wgpu_backend = "0.25.0"
 # egui_winit_platform = "0.19.0"
 # egui_demo_lib = "0.22.0"
 # egui-wgpu = "0.22.0"
 
-[dependencies.egui]
-path = "./thirdparty/egui/crates/egui"
+# [dependencies.egui]
+# path = "./thirdparty/egui/crates/egui"
 
-[dependencies.egui-wgpu]
-path = "./thirdparty/egui/crates/egui-wgpu"
+# [dependencies.egui-wgpu]
+# path = "./thirdparty/egui/crates/egui-wgpu"
 
-[dependencies.egui-winit]
-path = "./thirdparty/egui/crates/egui-winit"
+# [dependencies.egui-winit]
+# path = "./thirdparty/egui/crates/egui-winit"
 
 [dependencies.hoo-object]
 path = "./crates/hoo-object"

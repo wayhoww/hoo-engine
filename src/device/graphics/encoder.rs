@@ -10,6 +10,8 @@ use super::resource::*;
 use strum::*;
 use strum_macros::*;
 
+use egui_wgpu::wgpu as wgpu;
+
 struct FPipeline {
     // descriptor
 }
