@@ -78,6 +78,14 @@ pub trait TGPUResource {
     fn as_shader_module_mut(&mut self) -> Option<&mut FShaderModule> {
         None
     }
+
+    fn as_sampler(&self) -> Option<&FSampler> {
+        None
+    }
+
+    fn as_sampler_mut(&mut self) -> Option<&mut FSampler> {
+        None
+    }
 }
 
 pub struct FBuffer {
@@ -324,6 +332,82 @@ impl TGPUResource for FShaderModule {
 }
 
 #[derive(Debug)]
+pub struct FSampler {
+    device_sampler: Option<wgpu::Sampler>,
+    consolidation_id: u64,
+}
+
+impl FSampler {
+    pub fn new() -> Self {
+        Self {
+            device_sampler: None,
+            consolidation_id: 0,
+        }
+    }
+
+    pub fn new_and_manage() -> RcMut<Self> {
+        let res = rcmut!(Self::new());
+        hoo_engine()
+            .borrow()
+            .get_resources()
+            .add_gpu_resource(res.clone());
+        res
+    }
+
+    pub fn get_device_sampler(&self) -> &wgpu::Sampler {
+        self.device_sampler.as_ref().unwrap()
+    }
+}
+
+impl TGPUResource for FSampler {
+    fn create_device_resource(&mut self, encoder: &mut FDeviceEncoder) {
+        debug_assert!(self.device_sampler.is_none());
+
+        let device = encoder.get_device();
+        let desc = wgpu::SamplerDescriptor {
+            label: None,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            lod_min_clamp: -100.0, // ?
+            lod_max_clamp: 100.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        };
+
+        self.device_sampler = Some(device.create_sampler(&desc));
+    }
+
+    fn ready(&self) -> bool {
+        self.device_sampler.is_some()
+    }
+
+    fn need_update(&self) -> bool {
+        false
+    }
+
+    fn assign_consolidation_id(&mut self, id: u64) {
+        self.consolidation_id = id;
+    }
+
+    fn get_consolidation_id(&self) -> u64 {
+        self.consolidation_id
+    }
+
+    fn as_sampler(&self) -> Option<&FSampler> {
+        Some(self)
+    }
+
+    fn as_sampler_mut(&mut self) -> Option<&mut FSampler> {
+        Some(self)
+    }
+}
+
+#[derive(Debug)]
 pub struct FTexture {
     usages: BTextureUsages,
     format: ETextureFormat,
@@ -337,6 +421,19 @@ pub struct FTexture {
 }
 
 impl FTexture {
+    pub fn get_sample_type(&self) -> wgpu::TextureSampleType {
+        match self.format {
+            ETextureFormat::Bgra8Unorm => wgpu::TextureSampleType::Float { filterable: true },
+            ETextureFormat::Bgra8UnormSrgb => wgpu::TextureSampleType::Float { filterable: true },
+            ETextureFormat::Rgba16Float => wgpu::TextureSampleType::Float { filterable: true },
+            ETextureFormat::Rgba32Float => wgpu::TextureSampleType::Float { filterable: true },
+            ETextureFormat::R32Uint => wgpu::TextureSampleType::Uint,
+            ETextureFormat::Depth24PlusStencil8 => {
+                wgpu::TextureSampleType::Float { filterable: true }
+            } // TODO ?
+        }
+    }
+
     fn new_internal(format: ETextureFormat, usages: BTextureUsages) -> Self {
         #[cfg(debug_assertions)]
         let _ = Into::<wgpu::TextureFormat>::into(format);

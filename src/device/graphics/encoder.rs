@@ -225,7 +225,11 @@ impl FEditorRenderer {
         let overlay_mode = hoo_engine().borrow().get_editor().get_state().overlay_mode;
         pass.set_color_attachments(vec![FAttachment {
             texture_view: FTextureView::new_swapchain_view(),
-            load_op: if overlay_mode { ELoadOp::Load } else { ELoadOp::Clear }, 
+            load_op: if overlay_mode {
+                ELoadOp::Load
+            } else {
+                ELoadOp::Clear
+            },
             store_op: EStoreOp::Store,
             clear_value: FClearValue::Float4 {
                 r: bg_color.r() as f32 / 255.0,
@@ -387,7 +391,7 @@ pub struct FComputePassEncoder<'pass, 'device_encoder> {
     compute_pass: wgpu::ComputePass<'pass>,
     // 这些资源实际上的生命周期比 'pass 长
     resources: &'pass Vec<Ref<'pass, dyn TGPUResource>>,
-
+    bind_group_descriptor: FBindingGroupDescriptor,
     transient_resources_cache: &'pass bumpalo::Bump,
     // render_pipeline_cache: &'command_encoder typed_arena::Arena<wgpu::RenderPipeline>,
     // bind_group_cache: &'command_encoder typed_arena::Arena<wgpu::BindGroup>,
@@ -668,6 +672,7 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
             compute_pass: pass,
             resources: self.resources,
             transient_resources_cache: &transient_resources_cache,
+            bind_group_descriptor: FBindingGroupDescriptor::default(),
         };
         pass_closure(encoder, extra_data);
     }
@@ -868,13 +873,235 @@ impl<'command_encoder, 'device_encoder> FGraphicsPassEncoder<'command_encoder, '
     }
 }
 
+enum FBindingDescriptor {
+    Buffer { view: FBufferView, writable: bool },
+    SampledTexture { texture: FTextureView },
+    UnorderedAccess { texture: FTextureView },
+    SamplerType { sampler: FSampler },
+}
+
+impl FBindingDescriptor {
+    fn make_entry<'pass>(
+        &self,
+        encoder: &FComputePassEncoder<'pass, '_>,
+        binding_point: u32,
+    ) -> wgpu::BindGroupEntry<'pass> {
+        wgpu::BindGroupEntry {
+            binding: binding_point,
+            resource: match self {
+                FBindingDescriptor::Buffer { view, writable: _ } => {
+                    let buffer_id = view.get_buffer().borrow().get_consolidation_id();
+                    let buffer_ref = encoder.resources[buffer_id as usize].as_buffer().unwrap();
+
+                    wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: buffer_ref.get_device_buffer(),
+                        offset: view.get_offset() as wgpu::BufferAddress,
+                        size: None,
+                    })
+                }
+                // TODO: 统一用 consolidate id ?
+                FBindingDescriptor::SampledTexture { texture } => {
+                    let view = texture.get_device_texture_view(&encoder.encoder);
+                    let view = encoder.transient_resources_cache.alloc(view);
+                    wgpu::BindingResource::TextureView(view)
+                }
+                FBindingDescriptor::UnorderedAccess { texture } => {
+                    let view = texture.get_device_texture_view(&encoder.encoder);
+                    let view = encoder.transient_resources_cache.alloc(view);
+                    wgpu::BindingResource::TextureView(view)
+                }
+                FBindingDescriptor::SamplerType { sampler } => {
+                    let buffer_id = sampler.get_consolidation_id();
+                    let buffer_ref = encoder.resources[buffer_id as usize].as_sampler().unwrap();
+                    wgpu::BindingResource::Sampler(buffer_ref.get_device_sampler())
+                }
+            },
+        }
+    }
+
+    fn make_descriptor_entry(&self, binding_point: u32) -> wgpu::BindGroupLayoutEntry {
+        match self {
+            FBindingDescriptor::Buffer { view: _, writable } => {
+                wgpu::BindGroupLayoutEntry {
+                    binding: binding_point,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {
+                            read_only: !writable,
+                        }, // uniform 统一放在 bindgroup 0 里面
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            }
+            FBindingDescriptor::SampledTexture { texture } => {
+                let texture = texture.get_texture();
+                let tex_ref = texture.borrow();
+                wgpu::BindGroupLayoutEntry {
+                    binding: binding_point,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: tex_ref.get_sample_type(),
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }
+            }
+            FBindingDescriptor::UnorderedAccess { texture } => {
+                let texture = texture.get_texture();
+                let tex_ref = texture.borrow();
+                let out = wgpu::BindGroupLayoutEntry {
+                    binding: binding_point,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly, // 没错！WebGPU 不！支！持！ UAV。不知道能不能一图两绑，再不能就只能 pingpont 了
+                        format: tex_ref.get_format().into(),
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                };
+
+                out
+            }
+            FBindingDescriptor::SamplerType { sampler: _ } => wgpu::BindGroupLayoutEntry {
+                binding: binding_point,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        }
+    }
+}
+
+pub struct FBindingGroupDescriptor {
+    entries: Vec<(u32, FBindingDescriptor)>,
+}
+
+impl Default for FBindingGroupDescriptor {
+    fn default() -> Self {
+        Self { entries: vec![] }
+    }
+}
+
+impl FBindingGroupDescriptor {
+    pub fn add_buffer(&mut self, binding_point: u32, view: FBufferView) {
+        self.entries.push((
+            binding_point,
+            FBindingDescriptor::Buffer {
+                view,
+                writable: true,
+            },
+        )); // read `writable` it from FBufferView
+    }
+
+    // TODO: 这个要不要记录到 texture view 里面呢
+    pub fn add_sampled_texture(&mut self, binding_point: u32, texture: FTextureView) {
+        self.entries.push((
+            binding_point,
+            FBindingDescriptor::SampledTexture { texture },
+        ));
+    }
+
+    pub fn add_unordered_access(&mut self, binding_point: u32, texture: FTextureView) {
+        self.entries.push((
+            binding_point,
+            FBindingDescriptor::UnorderedAccess { texture },
+        ));
+    }
+
+    pub fn add_sampler(&mut self, binding_point: u32, sampler: FSampler) {
+        self.entries
+            .push((binding_point, FBindingDescriptor::SamplerType { sampler }));
+    }
+
+    fn make_layout_descriptor<'pass>(
+        &self,
+        encoder: &FComputePassEncoder<'pass, '_>,
+    ) -> wgpu::BindGroupLayoutDescriptor<'pass> {
+        let entries = self
+            .entries
+            .iter()
+            .map(|(binding_point, desc)| desc.make_descriptor_entry(*binding_point))
+            .collect::<Vec<_>>();
+        let entries = encoder.transient_resources_cache.alloc(entries);
+        wgpu::BindGroupLayoutDescriptor {
+            label: "Compute Bind Group Layout".into(),
+            entries: entries,
+        }
+    }
+
+    fn make_descriptor<'pass>(
+        &self,
+        encoder: &FComputePassEncoder<'pass, '_>,
+    ) -> wgpu::BindGroupDescriptor<'pass> {
+        let entries = self
+            .entries
+            .iter()
+            .map(|(binding_point, desc)| desc.make_entry(encoder, *binding_point))
+            .collect::<Vec<_>>();
+        let entries = encoder.transient_resources_cache.alloc(entries);
+
+        // encoder.compute_pass.m
+        let layout = encoder
+            .encoder
+            .get_device()
+            .create_bind_group_layout(&self.make_layout_descriptor(encoder));
+        let layout = encoder.transient_resources_cache.alloc(layout);
+
+        wgpu::BindGroupDescriptor {
+            label: "Compute Bind Group".into(),
+            layout: layout,
+            entries: entries,
+        }
+    }
+
+    fn make_bind_group<'pass>(&self, encoder: &FComputePassEncoder<'pass, '_>) -> wgpu::BindGroup {
+        let desc = self.make_descriptor(encoder);
+        encoder.encoder.get_device().create_bind_group(&desc)
+    }
+
+    fn make_bind_group_layout<'pass>(
+        &self,
+        encoder: &FComputePassEncoder<'pass, '_>,
+    ) -> wgpu::BindGroupLayout {
+        encoder
+            .encoder
+            .get_device()
+            .create_bind_group_layout(&self.make_layout_descriptor(encoder))
+    }
+}
+
 impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
     pub fn dispatch(&mut self, shader: &RcMut<FShaderModule>, group_count: (u32, u32, u32)) {
+
+        // TODO: bindgroup 0
         let shader_ref = shader.borrow();
+
+        let bind_group_layout = self.transient_resources_cache.alloc_slice_clone(&[
+            // self.transient_resources_cache
+            //     .alloc(FBindingGroupDescriptor::default().make_bind_group_layout(self)) as &wgpu::BindGroupLayout,
+            self.transient_resources_cache
+                .alloc(self.bind_group_descriptor.make_bind_group_layout(self)) as &wgpu::BindGroupLayout,
+        ]);
+
+        let bind_group = self
+            .transient_resources_cache
+            .alloc(self.bind_group_descriptor.make_bind_group(self));
+
+        let pipeline_layout_desc = wgpu::PipelineLayoutDescriptor {
+            label: "Compute Pipeline Layout".into(),
+            bind_group_layouts: bind_group_layout,
+            push_constant_ranges: &[],
+        };
+
+        let pipeline_layout = self.encoder.get_device().create_pipeline_layout(&pipeline_layout_desc);
+        let pipeline_layout = self.transient_resources_cache.alloc(pipeline_layout);
 
         let pipeline_desc = wgpu::ComputePipelineDescriptor {
             label: "Compute Pipeline".into(),
-            layout: None,
+            layout: Some(pipeline_layout),
             module: shader_ref.get_device_module().unwrap(),
             entry_point: shader_ref.get_compute_stage_entry().as_ref().unwrap(),
         };
@@ -884,10 +1111,17 @@ impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
             .create_compute_pipeline(&pipeline_desc);
         let pipeline = self.transient_resources_cache.alloc(pipeline);
         self.compute_pass.set_pipeline(pipeline);
+
+        self.compute_pass.set_bind_group(0, bind_group, &[]);
         self.compute_pass
             .dispatch_workgroups(group_count.0, group_count.1, group_count.2);
+
         // self.encoder.get_device().create_compute_pipeline()
         // self.encoder
         // self.compute_pass.set_pipeline()
+    }
+
+    pub fn get_bind_group_descriptor(&mut self) -> &mut FBindingGroupDescriptor {
+        &mut self.bind_group_descriptor
     }
 }

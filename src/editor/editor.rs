@@ -79,7 +79,7 @@ impl FEditor {
     pub fn new() -> Self {
         Self {
             main_viewport_texture: None,
-            state: FEditorState::new()
+            state: FEditorState::new(),
         }
     }
 
@@ -88,14 +88,17 @@ impl FEditor {
     }
 
     pub fn draw(&mut self, ctx: &egui::Context, mut gctx: FEguiGraphicsContext) {
-    //     egui::Image::new(gctx.register_texture_online(
-    //         self.main_viewport_texture.as_ref().unwrap(),
-    //     ), egui::vec2(512.0, 512.0)).paint_at(ui);
+        //     egui::Image::new(gctx.register_texture_online(
+        //         self.main_viewport_texture.as_ref().unwrap(),
+        //     ), egui::vec2(512.0, 512.0)).paint_at(ui);
 
-        egui::SidePanel::new(egui::panel::Side::Left, egui::Id::new("left-panel")).show(ctx, |ui| {
-            ui.heading("Left Panel");
-            ui.label("This is the left panel");
-        });
+        egui::SidePanel::new(egui::panel::Side::Left, egui::Id::new("left-panel")).show(
+            ctx,
+            |ui| {
+                ui.heading("Left Panel");
+                ui.label("This is the left panel");
+            },
+        );
 
         egui::Window::new("Editor Setting").show(ctx, |ui| {
             ui.label("Overlay Mode");
@@ -109,9 +112,8 @@ impl FEditor {
                 } else {
                     ui.label("No viewport texture");
                 }
-            });    
+            });
         }
-
 
         // egui::Window::new("Viewport")
         //     .resizable(true)

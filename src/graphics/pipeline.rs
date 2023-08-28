@@ -15,6 +15,8 @@ pub struct FGraphicsPipeline {
     cursor_pass: FCursorPass,
     compute_shader: RcMut<FShaderModule>,
 
+    uav: FTextureView,
+
     rt_color: FTextureView,
 
     uniform_view: FBufferView,
@@ -96,6 +98,15 @@ impl FGraphicsPipeline {
         let cs = FShaderModule::new_and_manage(load_string("shaders/compute.wgsl").unwrap());
         cs.borrow_mut().set_compute_stage_entry("main".into());
 
+        let uav_tex = FTexture::new_and_manage(
+            ETextureFormat::Rgba32Float,
+            BTextureUsages::UnorderedAccess | BTextureUsages::Sampled,
+        );
+
+        uav_tex.borrow_mut().set_size((512, 512));
+
+        let uav_tex_view = FTextureView::new(uav_tex.clone());
+
         Self {
             pass1,
             pass2,
@@ -105,6 +116,7 @@ impl FGraphicsPipeline {
             task_uniform_buffer,
             task_uniform_view,
             rt_color: FTextureView::new_swapchain_view(),
+            uav: uav_tex_view,
         }
     }
 
@@ -252,6 +264,9 @@ impl FGraphicsPipeline {
         });
 
         frame_encoder.encode_compute_pass(self.pass2.clone(), |mut pass_encoder| {
+            pass_encoder
+                .get_bind_group_descriptor()
+                .add_unordered_access(2, self.uav.clone());
             pass_encoder.dispatch(&self.compute_shader, (3, 1, 2));
         });
 

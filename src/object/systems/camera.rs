@@ -43,7 +43,10 @@ impl super::traits::TSystem for HCameraSystem {
         let camera: RcObject<HCameraComponent> = components[1].clone().try_downcast().unwrap();
         let camera_ref = camera.borrow_mut();
         if camera_ref.main_camera {
-            camera_ref.camera.borrow_mut().target = hoo_engine().borrow().get_renderer().get_main_viewport_target();
+            camera_ref.camera.borrow_mut().target = hoo_engine()
+                .borrow()
+                .get_renderer()
+                .get_main_viewport_target();
         }
         // let camera_desc = camera_ref.camera.borrow();
 
