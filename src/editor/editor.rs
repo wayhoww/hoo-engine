@@ -93,12 +93,12 @@ impl FEditor {
         // egui::Image::new(gctx.register_texture_online(
         //     self.main_viewport_texture.as_ref().unwrap(),
         // ), egui::vec2(512.0, 512.0)).paint_at(ui);
-        
+
         if self.state.overlay_mode {
             self.state.main_viewport_cursor_position = ctx.pointer_hover_pos().map(|pos| {
                 let rect = ctx.available_rect();
                 self.state.main_viewport_cursor_position = Some((pos.x, pos.y));
-                (pos.x - rect.left(), rect.bottom() - pos.y)
+                ((pos.x - rect.left()) * gctx.get_scale_factor(), (pos.y - rect.top()) * gctx.get_scale_factor())
             });
         }
 
@@ -121,15 +121,13 @@ impl FEditor {
                     let image = gctx.image(ui, tex);
                     let pointer_pos = image
                         .hover_pos()
-                        .map(|pos| (pos.x - image.rect.left(), image.rect.bottom() - pos.y));
+                        .map(|pos| ((pos.x - image.rect.left()) * gctx.get_scale_factor(), (pos.y - image.rect.top()) * gctx.get_scale_factor()));
                     self.state.main_viewport_cursor_position = pointer_pos;
                 } else {
                     ui.label("No viewport texture");
                 }
             });
         }
-
-        println!("cursor: {:?}", self.state.main_viewport_cursor_position);
 
         // egui::Window::new("Viewport")
         //     .resizable(true)

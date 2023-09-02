@@ -18,6 +18,8 @@ pub struct FGraphicsPipeline {
     uav: FTextureView,
 
     rt_color: FTextureView,
+    rt_depth: FTextureView,
+    rt_object_id: FTextureView,
 
     uniform_view: FBufferView,
 
@@ -116,11 +118,11 @@ impl FGraphicsPipeline {
         let uav_tex_view = FTextureView::new(uav_tex.clone());
 
         let readback_buffer = FBuffer::new_and_manage(BBufferUsages::MapRead);
-        readback_buffer.borrow_mut().resize(1024);
+        readback_buffer.borrow_mut().resize(4);
 
         let readback_src_buffer =
             FBuffer::new_and_manage(BBufferUsages::Storage | BBufferUsages::CopySrc);
-        readback_src_buffer.borrow_mut().resize(1024);
+        readback_src_buffer.borrow_mut().resize(4);
 
         let readback_src_bufferview =
             FBufferView::new_with_type(readback_src_buffer.clone(), EBufferViewType::Storage);
@@ -128,8 +130,27 @@ impl FGraphicsPipeline {
         let cursor_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
         cursor_uniform_buffer
             .borrow_mut()
-            .update_by_array(&[hoo_engine().borrow().get_editor().get_state().main_viewport_cursor_position.unwrap_or((0.0f32, 0.0f32))]);
+            .update_by_array(&[hoo_engine()
+                .borrow()
+                .get_editor()
+                .get_state()
+                .main_viewport_cursor_position
+                .unwrap_or((0.0f32, 0.0f32))]);
         let cursor_uniform_view = FBufferView::new_uniform(cursor_uniform_buffer.clone());
+
+        let texture_object_id = FTexture::new_and_manage(
+            ETextureFormat::R32Uint,
+            BTextureUsages::Attachment | BTextureUsages::Sampled,
+        );
+
+        texture_object_id.borrow_mut().set_size((512, 512));
+
+        let texture_depth = FTexture::new_and_manage(
+            ETextureFormat::Depth24PlusStencil8,
+            BTextureUsages::Attachment,
+        );
+
+        texture_depth.borrow_mut().set_size((512, 512));
 
         Self {
             pass1,
@@ -140,6 +161,8 @@ impl FGraphicsPipeline {
             task_uniform_buffer,
             task_uniform_view,
             rt_color: FTextureView::new_swapchain_view(),
+            rt_depth: FTextureView::new(texture_depth),
+            rt_object_id: FTextureView::new(texture_object_id),
             uav: uav_tex_view,
             readback_buffer: readback_buffer,
             readback_src_buffer: readback_src_buffer,
@@ -150,10 +173,6 @@ impl FGraphicsPipeline {
     }
 
     pub fn prepare(&mut self, context: &mut FPipelineContext) {
-        self.cursor_uniform_buffer
-            .borrow_mut()
-            .update_by_array(&[hoo_engine().borrow().get_editor().get_state().main_viewport_cursor_position.unwrap_or((0.0f32, 0.0f32))]);
-        
         let mat_view = {
             let camera_rotation: glm::Mat4 =
                 glm::make_mat3(&[-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0]).to_homogeneous();
@@ -185,82 +204,54 @@ impl FGraphicsPipeline {
                 .update_uniform_buffer();
         }
 
-        let size = match &context.render_target {
+        let viewport_size = match &context.render_target {
             crate::object::objects::HCameraTarget::Screen => {
                 let swapchain_image_view = FTextureView::new_swapchain_view();
                 self.rt_color = swapchain_image_view.clone();
-
-                self.pass1.set_color_attachments(vec![FAttachment::new(
-                    swapchain_image_view.clone(),
-                    ELoadOp::Clear,
-                    EStoreOp::Store,
-                )
-                .set_clear_value(FClearValue::Float4 {
-                    r: 0.1,
-                    g: 0.0,
-                    b: 0.1,
-                    a: 1.0,
-                })
-                .clone()]);
-
-                // self.pass2.set_color_attachments(vec![FAttachment::new(
-                //     swapchain_image_view.clone(),
-                //     ELoadOp::Load,
-                //     EStoreOp::Store,
-                // )]);
-
-                // context.
+                context.render_target_size
             }
             crate::object::objects::HCameraTarget::Texture(tex) => {
-                // let color_texture = FTexture::new_and_manage(
-                //     ETextureFormat::Bgra8Unorm,
-                //     BTextureUsages::Attachment | BTextureUsages::Sampled,
-                // );
                 let color_texture_view = FTextureView::new(tex.clone());
                 self.rt_color = color_texture_view.clone();
-
-                self.pass1.set_color_attachments(vec![FAttachment::new(
-                    color_texture_view.clone(),
-                    ELoadOp::Clear,
-                    EStoreOp::Store,
-                )
-                .set_clear_value(FClearValue::Float4 {
-                    r: 0.1,
-                    g: 0.0,
-                    b: 0.1,
-                    a: 1.0,
-                })
-                .clone()]);
-
-                // self.pass2.set_color_attachments(vec![FAttachment::new(
-                //     color_texture_view.clone(),
-                //     ELoadOp::Load,
-                //     EStoreOp::Store,
-                // )]);
+                tex.borrow().size()
             }
         };
 
-        let depth_stencil_texture = FTexture::new_and_manage(
-            ETextureFormat::Depth24PlusStencil8,
-            BTextureUsages::Attachment,
-        );
-
-        depth_stencil_texture
+        self.cursor_uniform_buffer
             .borrow_mut()
-            .set_size(context.render_target_size);
-        let depth_stencil_texture_view = FTextureView::new(depth_stencil_texture.clone());
+            .update_by_array(&[hoo_engine()
+                .borrow()
+                .get_editor()
+                .get_state()
+                .main_viewport_cursor_position
+                .map(|(x, y)| {
+                    (
+                        (x.round() as i32).clamp(0, viewport_size.0 as i32 - 1) as u32,
+                        (y.round() as i32).clamp(0, viewport_size.1 as i32 - 1) as u32,
+                    )
+                })
+                .unwrap_or((0, 0))]);
+
+        self.rt_depth
+            .get_texture()
+            .borrow_mut()
+            .set_size(viewport_size);
+        self.rt_object_id
+            .get_texture()
+            .borrow_mut()
+            .set_size(viewport_size);
+
+        self.pass1.set_color_attachments(vec![
+            FAttachment::new_write_to_view(self.rt_color.clone()),
+            FAttachment::new_write_to_view(self.rt_object_id.clone()),
+        ]);
+
         self.pass1.set_depth_stencil_attachment(FAttachment {
-            texture_view: depth_stencil_texture_view.clone(),
+            texture_view: self.rt_depth.clone(),
             load_op: ELoadOp::Clear,
             store_op: EStoreOp::Discard,
             clear_value: FClearValue::Float(1f32),
         });
-        // self.pass2.set_depth_stencil_attachment(FAttachment {
-        //     texture_view: depth_stencil_texture_view.clone(),
-        //     load_op: ELoadOp::Clear,
-        //     store_op: EStoreOp::Discard,
-        //     clear_value: FClearValue::Float(1f32),
-        // });
     }
 
     pub fn draw(&mut self, frame_encoder: &mut FFrameEncoder, context: &mut FPipelineContext) {
@@ -299,15 +290,16 @@ impl FGraphicsPipeline {
         frame_encoder.encode_compute_pass(self.pass2.clone(), |mut pass_encoder| {
             pass_encoder
                 .get_bind_group_descriptor()
-                .add_unordered_access(2, self.uav.clone())
-                .add_buffer(0, self.readback_src_buffer_view.clone());
+                .add_buffer(0, self.readback_src_buffer_view.clone())
+                .add_sampled_texture(1, self.rt_object_id.clone());
+            // .add_unordered_access(3, self.uav.clone());
             pass_encoder.dispatch(&self.compute_shader, (3, 1, 2), &self.cursor_uniform_view);
         });
 
         frame_encoder.copy_buffer(&self.readback_src_buffer, &self.readback_buffer);
 
-        frame_encoder.read_back(&self.readback_buffer, |data: Option<Vec<f32>>| {
-            // println!("readback: {:?}", data);
+        frame_encoder.read_back(&self.readback_buffer, |data: Option<Vec<u32>>| {
+            println!("readback: {:?}", data);
         });
 
         // frame_encoder.encode_render_pass(self.cursor_pass.get_pass(self.rt_color.clone()), |mut pass_encoder| {

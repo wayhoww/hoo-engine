@@ -213,9 +213,11 @@ impl TGPUResource for FBuffer {
         debug_assert!(self.device_buffer.is_none());
         debug_assert!(self.data.len() % 4 == 0);
 
+        let length = (self.data.len() as u64 + 15) / 16 * 16;
+
         let descriptor = wgpu::BufferDescriptor {
             label: None,
-            size: self.data.len() as u64,
+            size: length as u64,
             usage: wgpu::BufferUsages::COPY_DST | self.usages.into(),
             mapped_at_creation: false,
         };
@@ -323,6 +325,7 @@ impl TGPUResource for FShaderModule {
     fn create_device_resource(&mut self, encoder: &mut FDeviceEncoder) {
         debug_assert!(self.device_module.is_none());
 
+        println!("new shader module !!!!!!!!!!!!!!!!!!!!!!!!!");
         let options = wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(self.code.clone().into()),
@@ -495,6 +498,10 @@ impl FTexture {
     }
 
     pub fn set_size(&mut self, (width, height): (u32, u32)) -> &mut Self {
+        if width == self.width && height == self.height {
+            return self;
+        }
+
         self.width = width;
         self.height = height;
         self.updated = true;
@@ -1102,6 +1109,11 @@ impl FAttachment {
 
     pub fn new_append_to_view(view: FTextureView) -> Self {
         let attachment = Self::new(view, ELoadOp::Load, EStoreOp::Store);
+        return attachment;
+    }
+
+    pub fn new_write_to_view(view: FTextureView) -> Self {
+        let attachment = Self::new(view, ELoadOp::Clear, EStoreOp::Store);
         return attachment;
     }
 

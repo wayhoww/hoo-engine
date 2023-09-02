@@ -11,7 +11,6 @@ use strum::*;
 use strum_macros::*;
 
 use egui_wgpu::wgpu;
-use ::wgpu::Buffer;
 
 struct FPipeline {
     // descriptor
@@ -99,11 +98,7 @@ impl FPipeline {
         let pipeline_layout = pass_encoder.encoder.get_device().create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &pass_encoder
-                    .encoder
-                    .get_bind_group_layouts()
-                    .iter()
-                    .collect::<Vec<&wgpu::BindGroupLayout>>(),
+                bind_group_layouts: &[&pass_encoder.encoder.bind_group_layout_0_graphics],
                 push_constant_ranges: &[],
             },
         );
@@ -192,6 +187,10 @@ impl FEguiGraphicsContext<'_, '_, '_, '_> {
 
     pub fn image(&mut self, ui: &mut egui::Ui, texture: &RcMut<FTexture>) -> egui::Response {
         self.image_with_scale(ui, texture, 1.0)
+    }
+
+    pub fn get_scale_factor(&self) -> f32 {
+        self.editor_renderer.scale_factor
     }
 }
 
@@ -348,7 +347,8 @@ pub struct FDeviceEncoder {
     swapchain_size: (u32, u32),
     swapchain_format: ETextureFormat,
 
-    bind_group_layouts: Vec<wgpu::BindGroupLayout>,
+    bind_group_layout_0_graphics: wgpu::BindGroupLayout,
+    bind_group_layout_0_compute: wgpu::BindGroupLayout,
 
     uniform_buffer_view_global: Option<FBufferView>,
     uniform_buffer_view_task: Option<FBufferView>,
@@ -433,8 +433,12 @@ impl FDeviceEncoder {
         self.swapchain_format
     }
 
-    fn get_bind_group_layouts(&self) -> &Vec<wgpu::BindGroupLayout> {
-        &self.bind_group_layouts
+    fn get_bind_group_layout_0_graphics(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout_0_graphics
+    }
+
+    fn get_bind_group_layout_0_compute(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout_0_compute
     }
 
     pub fn resize_surface(&mut self) {
@@ -513,7 +517,8 @@ impl FDeviceEncoder {
         surface.configure(&device, &config);
         let surface_texture = surface.get_current_texture().unwrap();
 
-        let bind_group_layouts = Self::make_bind_group_layouts(&device);
+        let bind_group_layout_0_graphics = Self::make_bind_group_layout_0_for_graphics(&device);
+        let bind_group_layout_0_compute = Self::make_bind_group_layout_0_for_compute(&device);
 
         Self {
             instance,
@@ -528,7 +533,9 @@ impl FDeviceEncoder {
             swapchain_texture: RefCell::new(Some(surface_texture)),
             swapchain_format: ETextureFormat::try_from(surface_format).unwrap(),
 
-            bind_group_layouts,
+            bind_group_layout_0_graphics: bind_group_layout_0_graphics,
+            bind_group_layout_0_compute: bind_group_layout_0_compute,
+
             uniform_buffer_view_global: None,
             uniform_buffer_view_task: None,
             default_uniform_buffer_view: None,
@@ -565,14 +572,12 @@ impl FDeviceEncoder {
     // PassUniform: 在 Pass 中提供，大小可变
     // TaskUniform: 暂时没想好如何做抽象，先通过 SetTaskUniform 设置。类似于 Viewport 的概念，表示一个完整的渲染管线。
     // GlobalUniform: 通过 SetGlobalUniformBuffer 设置，大小固定
-    fn make_bind_group_layouts(device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
+    fn make_bind_group_layout_0_for_graphics(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         let mut bind_group_layout_entries = vec![];
         for i in 0..EUniformBufferType::COUNT {
             let entry = wgpu::BindGroupLayoutEntry {
                 binding: i as u32,
-                visibility: wgpu::ShaderStages::VERTEX
-                    | wgpu::ShaderStages::FRAGMENT
-                    | wgpu::ShaderStages::COMPUTE,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -584,13 +589,41 @@ impl FDeviceEncoder {
         }
 
         let desc = wgpu::BindGroupLayoutDescriptor {
-            label: Some("BindGroup-0"),
+            label: Some("BindGroup-0-Graphics"),
             entries: &bind_group_layout_entries,
         };
 
         let out = device.create_bind_group_layout(&desc);
+        out
+    }
 
-        vec![out]
+    fn make_bind_group_layout_0_for_compute(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        let mut bind_group_layout_entries = vec![];
+        for i in [
+            EUniformBufferType::DrawCall,
+            EUniformBufferType::Task,
+            EUniformBufferType::Global,
+        ] {
+            let entry = wgpu::BindGroupLayoutEntry {
+                binding: i as u32,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            };
+            bind_group_layout_entries.push(entry);
+        }
+
+        let desc = wgpu::BindGroupLayoutDescriptor {
+            label: Some("BindGroup-0-Compute"),
+            entries: &bind_group_layout_entries,
+        };
+
+        let out = device.create_bind_group_layout(&desc);
+        out
     }
 
     pub fn set_global_uniform_buffer_view(&mut self, buffer: FBufferView) {
@@ -649,7 +682,7 @@ impl FDeviceEncoder {
         for (id, _) in readbacks.iter() {
             let buffer_ref = res_ref[*id as usize].as_buffer().unwrap();
             let device_buffer = buffer_ref.get_device_buffer();
-            let slice = device_buffer.slice(..);
+            let slice = device_buffer.slice(0..buffer_ref.size());
             slice.map_async(
                 wgpu::MapMode::Read,
                 move |res: Result<(), wgpu::BufferAsyncError>| {
@@ -924,7 +957,7 @@ impl<'command_encoder, 'device_encoder> FGraphicsPassEncoder<'command_encoder, '
 
         entry
     }
-    
+
     fn create_bind_group_0(&mut self, draw_command: &FDrawCommand) -> wgpu::BindGroup {
         let bind_group_entries = [
             self.create_bind_group_entry_of_buffer(
@@ -954,7 +987,7 @@ impl<'command_encoder, 'device_encoder> FGraphicsPassEncoder<'command_encoder, '
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
-                layout: &self.encoder.bind_group_layouts[0],
+                layout: &&self.encoder.bind_group_layout_0_graphics,
                 entries: &bind_group_entries,
             });
         bindgroup_0
@@ -965,7 +998,7 @@ enum FBindingDescriptor {
     Buffer { view: FBufferView, writable: bool },
     SampledTexture { texture: FTextureView },
     UnorderedAccess { texture: FTextureView },
-    SamplerType { sampler: FSampler },
+    SamplerType { sampler: RcMut<FSampler> },
 }
 
 impl FBindingDescriptor {
@@ -999,7 +1032,7 @@ impl FBindingDescriptor {
                     wgpu::BindingResource::TextureView(view)
                 }
                 FBindingDescriptor::SamplerType { sampler } => {
-                    let buffer_id = sampler.get_consolidation_id();
+                    let buffer_id = sampler.borrow().get_consolidation_id();
                     let buffer_ref = encoder.resources[buffer_id as usize].as_sampler().unwrap();
                     wgpu::BindingResource::Sampler(buffer_ref.get_device_sampler())
                 }
@@ -1102,9 +1135,13 @@ impl FBindingGroupDescriptor {
         self
     }
 
-    pub fn add_sampler(&mut self, binding_point: u32, sampler: FSampler) -> &mut Self {
-        self.entries
-            .push((binding_point, FBindingDescriptor::SamplerType { sampler }));
+    pub fn add_sampler(&mut self, binding_point: u32, sampler: &RcMut<FSampler>) -> &mut Self {
+        self.entries.push((
+            binding_point,
+            FBindingDescriptor::SamplerType {
+                sampler: sampler.clone(),
+            },
+        ));
         self
     }
 
@@ -1166,15 +1203,19 @@ impl FBindingGroupDescriptor {
 }
 
 impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
-    pub fn dispatch(&mut self, shader: &RcMut<FShaderModule>, group_count: (u32, u32, u32), call_view: &FBufferView) {
+    pub fn dispatch(
+        &mut self,
+        shader: &RcMut<FShaderModule>,
+        group_count: (u32, u32, u32),
+        call_view: &FBufferView,
+    ) {
         let shader_ref = shader.borrow();
 
         let bind_group_0 = self.create_bind_group_0(call_view);
         let bind_group_0 = self.transient_resources_cache.alloc(bind_group_0);
 
-        let bind_group_layout = self.transient_resources_cache.alloc_slice_clone(&[
-            // self.transient_resources_cache
-            //     .alloc(FBindingGroupDescriptor::default().make_bind_group_layout(self)) as &wgpu::BindGroupLayout,
+        let bind_group_layouts = self.transient_resources_cache.alloc_slice_clone(&[
+            &self.encoder.bind_group_layout_0_compute,
             self.transient_resources_cache
                 .alloc(self.bind_group_descriptor.make_bind_group_layout(self))
                 as &wgpu::BindGroupLayout,
@@ -1184,10 +1225,9 @@ impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
             .transient_resources_cache
             .alloc(self.bind_group_descriptor.make_bind_group(self));
 
-
         let pipeline_layout_desc = wgpu::PipelineLayoutDescriptor {
             label: "Compute Pipeline Layout".into(),
-            bind_group_layouts: bind_group_layout,
+            bind_group_layouts: &bind_group_layouts,
             push_constant_ranges: &[],
         };
 
@@ -1212,7 +1252,7 @@ impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
 
         self.compute_pass.set_bind_group(0, bind_group_0, &[]);
         self.compute_pass.set_bind_group(1, bind_group_1, &[]);
- 
+
         self.compute_pass
             .dispatch_workgroups(group_count.0, group_count.1, group_count.2);
     }
@@ -1240,17 +1280,14 @@ impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
 
         entry
     }
-    
+
     fn create_bind_group_0(&mut self, call_view: &FBufferView) -> wgpu::BindGroup {
         let bind_group_entries = [
             // self.create_bind_group_entry_of_buffer(
             //     EUniformBufferType::Material as u32,
             //     draw_command.get_material_view(),
             // ),
-            self.create_bind_group_entry_of_buffer(
-                EUniformBufferType::DrawCall as u32,
-                call_view,
-            ),
+            self.create_bind_group_entry_of_buffer(EUniformBufferType::DrawCall as u32, call_view),
             // self.create_bind_group_entry_of_buffer(
             //     EUniformBufferType::Pass as u32,
             //     self.pass.get_uniform_buffer_view(),
@@ -1270,7 +1307,7 @@ impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
-                layout: &self.encoder.bind_group_layouts[0],
+                layout: &self.encoder.bind_group_layout_0_compute,
                 entries: &bind_group_entries,
             });
         bindgroup_0

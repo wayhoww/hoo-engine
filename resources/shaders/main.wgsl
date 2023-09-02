@@ -22,6 +22,7 @@ struct VertexOut {
 
 struct FragmentOut {
     @location(0) color : vec4f,
+    @location(1) object_id: u32
     // @builtin(frag_depth) depth: f32,
 };
 
@@ -103,5 +104,6 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
 
     var fragment_out: FragmentOut;
     fragment_out.color = vec4f(out, 1.0);
+    fragment_out.object_id = 10086u;
     return fragment_out;
 }
