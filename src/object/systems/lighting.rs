@@ -31,6 +31,7 @@ impl super::traits::TSystem for HLightingSystem {
         &mut self,
         _space: &HSpace,
         _delta_time: f64,
+        _: usize,
         components: Vec<hoo_object::RcTrait<dyn Any>>,
     ) {
         let transform: RcObject<HTransformComponent> =
@@ -49,7 +50,7 @@ impl super::traits::TSystem for HLightingSystem {
         self.lights.push(shader_light);
     }
 
-    fn get_interested_components(&self) -> &'static [u32] {
-        &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_LIGHT]
+    fn get_interested_components(&self) -> &'static [&'static [u32]] {
+        &[&[COMPONENT_ID_TRANSFORM, COMPONENT_ID_LIGHT]]
     }
 }

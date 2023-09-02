@@ -6,6 +6,7 @@ pub const COMPONENT_ID_STATIC_MODEL: u32 = 0;
 pub const COMPONENT_ID_TRANSFORM: u32 = 1;
 pub const COMPONENT_ID_CAMERA: u32 = 2;
 pub const COMPONENT_ID_LIGHT: u32 = 3;
+pub const COMPONENT_ID_AXIS: u32 = 4;
 
 pub struct HStaticModelComponent {
     pub model: RcObject<objects::HStaticModel>,
@@ -66,3 +67,5 @@ pub struct HCameraComponent {
 pub struct HLightComponent {
     pub light: RcObject<objects::HLight>,
 }
+
+pub struct HAxisComponent {} // empty

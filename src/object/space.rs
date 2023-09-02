@@ -8,6 +8,14 @@ pub struct HSpace {
     pub executed_systems: Vec<RcTrait<dyn TSystem>>,
 }
 
+pub struct FSystemTickStruct<'stack> {
+    pub space: &'stack HSpace,
+    pub delta_time: f64,
+    pub group: usize,
+    pub components: Vec<RcAny>,
+    pub entity_id: usize,
+}
+
 impl HSpace {
     pub fn new() -> Self {
         HSpace {
@@ -45,18 +53,21 @@ impl HSpace {
         for system in self.systems.iter() {
             system.borrow_mut().before_first_tick(self, delta_time);
             for entity in self.entities.iter() {
-                let mut components: Vec<RcAny> = Vec::new();
-                for interested_component in system.borrow().get_interested_components() {
-                    if let Some(component) = entity.components.get(interested_component) {
-                        components.push(component.clone());
-                    } else {
-                        break;
+                let groups = system.borrow().get_interested_components();
+                for (i, interested_component_group) in groups.iter().enumerate() {
+                    let mut components: Vec<RcAny> = Vec::new();
+                    for interested_component in interested_component_group.iter() {
+                        if let Some(component) = entity.components.get(interested_component) {
+                            components.push(component.clone());
+                        } else {
+                            break;
+                        }
                     }
-                }
-                if components.len() == system.borrow().get_interested_components().len() {
-                    system
-                        .borrow_mut()
-                        .tick_entity(self, delta_time, components);
+                    if components.len() == interested_component_group.len() {
+                        system
+                            .borrow_mut()
+                            .tick_entity(self, delta_time, i, components);
+                    }
                 }
             }
             self.executed_systems.push(system.clone());

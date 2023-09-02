@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::atomic::AtomicU64};
 
 use hoo_object::RcAny;
 
@@ -8,6 +8,10 @@ pub struct HEntity {
 
 impl HEntity {
     pub fn new() -> Self {
+        thread_local! {
+            static COUNTER: AtomicU64 = AtomicU64::new(0)
+        }
+
         HEntity {
             components: HashMap::new(),
         }

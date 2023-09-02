@@ -11,6 +11,7 @@ use strum::*;
 use strum_macros::*;
 
 use egui_wgpu::wgpu;
+use ::wgpu::Buffer;
 
 struct FPipeline {
     // descriptor
@@ -355,6 +356,8 @@ pub struct FDeviceEncoder {
 
     editor: Option<RcMut<FEditorRenderer>>,
     window: RcMut<winit::window::Window>,
+
+    readbacks: Option<Vec<(u64, Box<dyn FnOnce(Option<&[u8]>)>)>>,
 }
 
 pub struct FFrameEncoder<'command_encoder, 'device_encoder> {
@@ -384,7 +387,7 @@ pub struct FGraphicsPassEncoder<'pass, 'device_encoder> {
 // paint_jobs
 pub struct FComputePassEncoder<'pass, 'device_encoder> {
     // access using a function
-    encoder: &'device_encoder FDeviceEncoder,
+    encoder: &'device_encoder mut FDeviceEncoder,
 
     // keep them private
     pass: FComputePass,
@@ -532,6 +535,8 @@ impl FDeviceEncoder {
 
             editor: None,
             window: window.clone(),
+
+            readbacks: Some(vec![]),
         }
     }
 
@@ -632,6 +637,39 @@ impl FDeviceEncoder {
         self.queue.submit(std::iter::once(command_encoder.finish()));
         self.present();
 
+        // let mut command_encoder = self
+        //     .device
+        //     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        //         label: Some("Readback Command Encoder"),
+        //     });
+
+        let readbacks = self.readbacks.take().unwrap();
+        self.readbacks = Some(vec![]);
+
+        for (id, _) in readbacks.iter() {
+            let buffer_ref = res_ref[*id as usize].as_buffer().unwrap();
+            let device_buffer = buffer_ref.get_device_buffer();
+            let slice = device_buffer.slice(..);
+            slice.map_async(
+                wgpu::MapMode::Read,
+                move |res: Result<(), wgpu::BufferAsyncError>| {
+                    assert!(res.is_ok());
+                },
+            );
+        }
+
+        self.device.poll(wgpu::Maintain::Wait);
+
+        for (id, callback) in readbacks {
+            let buffer = res_ref[id as usize].as_buffer().unwrap();
+            let buffer = buffer.get_device_buffer();
+            let slice = buffer.slice(..);
+            let data = slice.get_mapped_range();
+            callback(Some(&data));
+            drop(data);
+            buffer.unmap();
+        }
+
         self.resize_surface();
     }
 
@@ -667,7 +705,7 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
         let pass = self.command_encoder.begin_compute_pass(&desc);
         let transient_resources_cache = bumpalo::Bump::new();
         let encoder = FComputePassEncoder {
-            encoder: &self.encoder,
+            encoder: &mut self.encoder,
             pass: compute_pass,
             compute_pass: pass,
             resources: self.resources,
@@ -758,6 +796,51 @@ impl<'command_encoder, 'device_encoder> FFrameEncoder<'command_encoder, 'device_
         pass_closure(pass_encoder, extra_data);
     }
 
+    pub fn copy_buffer(&mut self, buf1: &RcMut<FBuffer>, buf2: &RcMut<FBuffer>) {
+        let buf1_ref = buf1.borrow();
+        let buf2_ref = buf2.borrow();
+        let buf1_ref = self.resources[buf1_ref.get_consolidation_id() as usize]
+            .as_buffer()
+            .unwrap();
+        let buf2_ref = self.resources[buf2_ref.get_consolidation_id() as usize]
+            .as_buffer()
+            .unwrap();
+        let buf1 = buf1_ref.get_device_buffer();
+        let buf2 = buf2_ref.get_device_buffer();
+        self.command_encoder.copy_buffer_to_buffer(
+            buf1,
+            0,
+            buf2,
+            0,
+            buf1_ref.size().min(buf2.size()),
+        );
+    }
+
+    pub fn read_back<T: Clone + TPod>(
+        &mut self,
+        buffer: &RcMut<FBuffer>,
+        callback: impl FnOnce(Option<Vec<T>>) + 'static,
+    ) {
+        let buffer_ref = buffer.borrow();
+        // let buffer_ref = self.resources[buffer_ref.get_consolidation_id() as usize]
+        //     .as_buffer()
+        //     .unwrap();
+        // let device_buffer = buffer_ref.get_device_buffer();
+        // let slice = device_buffer.slice(..);
+        // slice.map_async(
+        //     wgpu::MapMode::Read,
+        //     move |res: Result<(), wgpu::BufferAsyncError>| {
+        //         assert!(res.is_ok());
+        //     },
+        // );
+        self.encoder.readbacks.as_mut().unwrap().push((
+            buffer_ref.get_consolidation_id(),
+            Box::new(move |slice| {
+                callback(slice.map(bin_string_to_vec));
+            }),
+        ));
+    }
+
     pub fn get_device_encoder(&mut self) -> &mut FDeviceEncoder {
         self.encoder
     }
@@ -774,26 +857,6 @@ impl<'command_encoder, 'device_encoder> FGraphicsPassEncoder<'command_encoder, '
             pipeline.create_device_resource_with_pass(self, vertex_entries, shader_module);
         let pipeline_ref = self.transient_resources_cache.alloc(device_pipeline);
         self.render_pass.set_pipeline(pipeline_ref);
-    }
-
-    pub fn create_bind_group_entry_of_buffer(
-        &self,
-        binding: u32,
-        view: &FBufferView,
-    ) -> wgpu::BindGroupEntry {
-        let buffer_id = view.get_buffer().borrow().get_consolidation_id();
-        let buffer_ref = self.resources[buffer_id as usize].as_buffer().unwrap();
-
-        let entry = wgpu::BindGroupEntry {
-            binding,
-            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer: buffer_ref.get_device_buffer(),
-                offset: view.get_offset() as wgpu::BufferAddress,
-                size: None,
-            }),
-        };
-
-        entry
     }
 
     pub fn draw(&mut self, draw_command: &FDrawCommand) {
@@ -832,6 +895,37 @@ impl<'command_encoder, 'device_encoder> FGraphicsPassEncoder<'command_encoder, '
             wgpu::IndexFormat::Uint32,
         );
 
+        let bindgroup_0 = self.create_bind_group_0(draw_command);
+
+        let bindgroup_0_ref = self.transient_resources_cache.alloc(bindgroup_0);
+
+        self.render_pass.set_bind_group(0, bindgroup_0_ref, &[]);
+
+        self.render_pass
+            .draw_indexed(0..draw_command.get_index_count() as u32, 0, 0..1);
+    }
+
+    pub fn create_bind_group_entry_of_buffer(
+        &self,
+        binding: u32,
+        view: &FBufferView,
+    ) -> wgpu::BindGroupEntry {
+        let buffer_id = view.get_buffer().borrow().get_consolidation_id();
+        let buffer_ref = self.resources[buffer_id as usize].as_buffer().unwrap();
+
+        let entry = wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: buffer_ref.get_device_buffer(),
+                offset: view.get_offset() as wgpu::BufferAddress,
+                size: None,
+            }),
+        };
+
+        entry
+    }
+    
+    fn create_bind_group_0(&mut self, draw_command: &FDrawCommand) -> wgpu::BindGroup {
         let bind_group_entries = [
             self.create_bind_group_entry_of_buffer(
                 EUniformBufferType::Material as u32,
@@ -863,13 +957,7 @@ impl<'command_encoder, 'device_encoder> FGraphicsPassEncoder<'command_encoder, '
                 layout: &self.encoder.bind_group_layouts[0],
                 entries: &bind_group_entries,
             });
-
-        let bindgroup_0_ref = self.transient_resources_cache.alloc(bindgroup_0);
-
-        self.render_pass.set_bind_group(0, bindgroup_0_ref, &[]);
-
-        self.render_pass
-            .draw_indexed(0..draw_command.get_index_count() as u32, 0, 0..1);
+        bindgroup_0
     }
 }
 
@@ -986,7 +1074,7 @@ impl Default for FBindingGroupDescriptor {
 }
 
 impl FBindingGroupDescriptor {
-    pub fn add_buffer(&mut self, binding_point: u32, view: FBufferView) {
+    pub fn add_buffer(&mut self, binding_point: u32, view: FBufferView) -> &mut Self {
         self.entries.push((
             binding_point,
             FBindingDescriptor::Buffer {
@@ -994,26 +1082,30 @@ impl FBindingGroupDescriptor {
                 writable: true,
             },
         )); // read `writable` it from FBufferView
+        self
     }
 
     // TODO: 这个要不要记录到 texture view 里面呢
-    pub fn add_sampled_texture(&mut self, binding_point: u32, texture: FTextureView) {
+    pub fn add_sampled_texture(&mut self, binding_point: u32, texture: FTextureView) -> &mut Self {
         self.entries.push((
             binding_point,
             FBindingDescriptor::SampledTexture { texture },
         ));
+        self
     }
 
-    pub fn add_unordered_access(&mut self, binding_point: u32, texture: FTextureView) {
+    pub fn add_unordered_access(&mut self, binding_point: u32, texture: FTextureView) -> &mut Self {
         self.entries.push((
             binding_point,
             FBindingDescriptor::UnorderedAccess { texture },
         ));
+        self
     }
 
-    pub fn add_sampler(&mut self, binding_point: u32, sampler: FSampler) {
+    pub fn add_sampler(&mut self, binding_point: u32, sampler: FSampler) -> &mut Self {
         self.entries
             .push((binding_point, FBindingDescriptor::SamplerType { sampler }));
+        self
     }
 
     fn make_layout_descriptor<'pass>(
@@ -1074,21 +1166,24 @@ impl FBindingGroupDescriptor {
 }
 
 impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
-    pub fn dispatch(&mut self, shader: &RcMut<FShaderModule>, group_count: (u32, u32, u32)) {
-
-        // TODO: bindgroup 0
+    pub fn dispatch(&mut self, shader: &RcMut<FShaderModule>, group_count: (u32, u32, u32), call_view: &FBufferView) {
         let shader_ref = shader.borrow();
+
+        let bind_group_0 = self.create_bind_group_0(call_view);
+        let bind_group_0 = self.transient_resources_cache.alloc(bind_group_0);
 
         let bind_group_layout = self.transient_resources_cache.alloc_slice_clone(&[
             // self.transient_resources_cache
             //     .alloc(FBindingGroupDescriptor::default().make_bind_group_layout(self)) as &wgpu::BindGroupLayout,
             self.transient_resources_cache
-                .alloc(self.bind_group_descriptor.make_bind_group_layout(self)) as &wgpu::BindGroupLayout,
+                .alloc(self.bind_group_descriptor.make_bind_group_layout(self))
+                as &wgpu::BindGroupLayout,
         ]);
 
-        let bind_group = self
+        let bind_group_1 = self
             .transient_resources_cache
             .alloc(self.bind_group_descriptor.make_bind_group(self));
+
 
         let pipeline_layout_desc = wgpu::PipelineLayoutDescriptor {
             label: "Compute Pipeline Layout".into(),
@@ -1096,7 +1191,10 @@ impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
             push_constant_ranges: &[],
         };
 
-        let pipeline_layout = self.encoder.get_device().create_pipeline_layout(&pipeline_layout_desc);
+        let pipeline_layout = self
+            .encoder
+            .get_device()
+            .create_pipeline_layout(&pipeline_layout_desc);
         let pipeline_layout = self.transient_resources_cache.alloc(pipeline_layout);
 
         let pipeline_desc = wgpu::ComputePipelineDescriptor {
@@ -1112,16 +1210,69 @@ impl<'pass, 'device_encoder> FComputePassEncoder<'pass, 'device_encoder> {
         let pipeline = self.transient_resources_cache.alloc(pipeline);
         self.compute_pass.set_pipeline(pipeline);
 
-        self.compute_pass.set_bind_group(0, bind_group, &[]);
+        self.compute_pass.set_bind_group(0, bind_group_0, &[]);
+        self.compute_pass.set_bind_group(1, bind_group_1, &[]);
+ 
         self.compute_pass
             .dispatch_workgroups(group_count.0, group_count.1, group_count.2);
-
-        // self.encoder.get_device().create_compute_pipeline()
-        // self.encoder
-        // self.compute_pass.set_pipeline()
     }
 
     pub fn get_bind_group_descriptor(&mut self) -> &mut FBindingGroupDescriptor {
         &mut self.bind_group_descriptor
+    }
+
+    pub fn create_bind_group_entry_of_buffer(
+        &self,
+        binding: u32,
+        view: &FBufferView,
+    ) -> wgpu::BindGroupEntry {
+        let buffer_id = view.get_buffer().borrow().get_consolidation_id();
+        let buffer_ref = self.resources[buffer_id as usize].as_buffer().unwrap();
+
+        let entry = wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: buffer_ref.get_device_buffer(),
+                offset: view.get_offset() as wgpu::BufferAddress,
+                size: None,
+            }),
+        };
+
+        entry
+    }
+    
+    fn create_bind_group_0(&mut self, call_view: &FBufferView) -> wgpu::BindGroup {
+        let bind_group_entries = [
+            // self.create_bind_group_entry_of_buffer(
+            //     EUniformBufferType::Material as u32,
+            //     draw_command.get_material_view(),
+            // ),
+            self.create_bind_group_entry_of_buffer(
+                EUniformBufferType::DrawCall as u32,
+                call_view,
+            ),
+            // self.create_bind_group_entry_of_buffer(
+            //     EUniformBufferType::Pass as u32,
+            //     self.pass.get_uniform_buffer_view(),
+            // ),
+            self.create_bind_group_entry_of_buffer(
+                EUniformBufferType::Task as u32,
+                self.encoder.uniform_buffer_view_task.as_ref().unwrap(),
+            ),
+            self.create_bind_group_entry_of_buffer(
+                EUniformBufferType::Global as u32,
+                self.encoder.uniform_buffer_view_global.as_ref().unwrap(),
+            ),
+        ];
+
+        let bindgroup_0 = self
+            .encoder
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.encoder.bind_group_layouts[0],
+                entries: &bind_group_entries,
+            });
+        bindgroup_0
     }
 }

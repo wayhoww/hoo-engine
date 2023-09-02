@@ -32,6 +32,7 @@ impl super::traits::TSystem for HCameraSystem {
         &mut self,
         space: &HSpace,
         _delta_time: f64,
+        _: usize,
         components: Vec<hoo_object::RcTrait<dyn Any>>,
     ) {
         // 这段代码太麻烦了，试试看用宏简化？
@@ -92,7 +93,7 @@ impl super::traits::TSystem for HCameraSystem {
 
     fn end_frame(&mut self, _: &HSpace) {}
 
-    fn get_interested_components(&self) -> &'static [u32] {
-        &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_CAMERA]
+    fn get_interested_components(&self) -> &'static [&'static [u32]] {
+        &[&[COMPONENT_ID_TRANSFORM, COMPONENT_ID_CAMERA]]
     }
 }

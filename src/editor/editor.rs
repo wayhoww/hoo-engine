@@ -5,13 +5,15 @@ use crate::{
 };
 
 pub struct FEditorState {
-    pub overlay_mode: bool,
+    pub overlay_mode: bool, // write_only
+    pub main_viewport_cursor_position: Option<(f32, f32)>,
 }
 
 impl FEditorState {
     pub fn new() -> Self {
         Self {
             overlay_mode: false,
+            main_viewport_cursor_position: None,
         }
     }
 }
@@ -88,9 +90,17 @@ impl FEditor {
     }
 
     pub fn draw(&mut self, ctx: &egui::Context, mut gctx: FEguiGraphicsContext) {
-        //     egui::Image::new(gctx.register_texture_online(
-        //         self.main_viewport_texture.as_ref().unwrap(),
-        //     ), egui::vec2(512.0, 512.0)).paint_at(ui);
+        // egui::Image::new(gctx.register_texture_online(
+        //     self.main_viewport_texture.as_ref().unwrap(),
+        // ), egui::vec2(512.0, 512.0)).paint_at(ui);
+        
+        if self.state.overlay_mode {
+            self.state.main_viewport_cursor_position = ctx.pointer_hover_pos().map(|pos| {
+                let rect = ctx.available_rect();
+                self.state.main_viewport_cursor_position = Some((pos.x, pos.y));
+                (pos.x - rect.left(), rect.bottom() - pos.y)
+            });
+        }
 
         egui::SidePanel::new(egui::panel::Side::Left, egui::Id::new("left-panel")).show(
             ctx,
@@ -108,12 +118,18 @@ impl FEditor {
         if !self.state.overlay_mode {
             egui::panel::CentralPanel::default().show(ctx, |ui| {
                 if let Some(tex) = self.main_viewport_texture.as_ref() {
-                    gctx.image(ui, tex);
+                    let image = gctx.image(ui, tex);
+                    let pointer_pos = image
+                        .hover_pos()
+                        .map(|pos| (pos.x - image.rect.left(), image.rect.bottom() - pos.y));
+                    self.state.main_viewport_cursor_position = pointer_pos;
                 } else {
                     ui.label("No viewport texture");
                 }
             });
         }
+
+        println!("cursor: {:?}", self.state.main_viewport_cursor_position);
 
         // egui::Window::new("Viewport")
         //     .resizable(true)

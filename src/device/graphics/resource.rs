@@ -23,6 +23,11 @@ bitflags! {
         const Vertex = 0x1;
         const Index = 0x2;
         const Uniform = 0x4;
+        const Storage = 0x8;
+        const MapRead = 0x10;
+        const MapWrite = 0x20;
+        const CopySrc = 0x40;
+        const CopyDest = 0x80;
     }
 }
 
@@ -39,7 +44,22 @@ impl From<BBufferUsages> for wgpu::BufferUsages {
         if val.contains(BBufferUsages::Uniform) {
             ret |= wgpu::BufferUsages::UNIFORM;
         }
-
+        if val.contains(BBufferUsages::Storage) {
+            ret |= wgpu::BufferUsages::STORAGE;
+        }
+        if val.contains(BBufferUsages::CopySrc) {
+            ret |= wgpu::BufferUsages::COPY_SRC;
+        }
+        if val.contains(BBufferUsages::CopyDest) {
+            ret |= wgpu::BufferUsages::COPY_DST;
+        }
+        if val.contains(BBufferUsages::MapRead) {
+            ret |= wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;
+        }
+        if val.contains(BBufferUsages::MapWrite) {
+            debug_assert!(val == BBufferUsages::MapWrite);
+            ret |= wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC;
+        }
         ret
     }
 }
@@ -151,6 +171,10 @@ impl FBuffer {
     }
 
     fn upload_data(&mut self, queue: &wgpu::Queue) {
+        if self.usages.contains(BBufferUsages::MapRead) {
+            return;
+        }
+
         queue.write_buffer(self.device_buffer.as_ref().unwrap(), 0, &self.data);
         self.data_updated = false;
     }
@@ -785,6 +809,7 @@ pub enum EBufferViewType {
     Vertex,
     Index,
     Uniform,
+    Storage,
 }
 
 impl EBufferViewType {
@@ -793,10 +818,12 @@ impl EBufferViewType {
             EBufferViewType::Vertex => BBufferUsages::Vertex,
             EBufferViewType::Index => BBufferUsages::Index,
             EBufferViewType::Uniform => BBufferUsages::Uniform,
+            EBufferViewType::Storage => BBufferUsages::Storage,
         }
     }
 }
 
+// 这个抽象好像没啥用，考虑删掉
 #[derive(Clone)]
 pub struct FBufferView {
     buffer: RcMut<FBuffer>,

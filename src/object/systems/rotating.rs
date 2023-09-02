@@ -23,6 +23,7 @@ impl super::traits::TSystem for HRotatingSystem {
         &mut self,
         _space: &HSpace,
         _delta_time: f64,
+        _: usize,
         components: Vec<hoo_object::RcTrait<dyn Any>>,
     ) {
         let transform: RcObject<HTransformComponent> =
@@ -35,7 +36,7 @@ impl super::traits::TSystem for HRotatingSystem {
             nalgebra_glm::quat_angle_axis(angle, &nalgebra_glm::vec3(0.0, 0.0, 1.0));
     }
 
-    fn get_interested_components(&self) -> &'static [u32] {
-        &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_STATIC_MODEL]
+    fn get_interested_components(&self) -> &'static [&'static [u32]] {
+        &[&[COMPONENT_ID_TRANSFORM, COMPONENT_ID_STATIC_MODEL]]
     }
 }

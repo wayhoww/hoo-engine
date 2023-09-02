@@ -60,11 +60,12 @@ impl super::traits::TSystem for HGraphicsSystem {
         &mut self,
         _space: &HSpace,
         _delta_time: f64,
+        _: usize,
         components: Vec<hoo_object::RcTrait<dyn Any>>,
     ) {
-        let static_model: RcObject<HStaticModelComponent> =
-            components[0].clone().try_downcast().unwrap();
         let transform: RcObject<HTransformComponent> =
+            components[0].clone().try_downcast().unwrap();
+        let static_model: RcObject<HStaticModelComponent> =
             components[1].clone().try_downcast().unwrap();
 
         let transform_ref = transform.borrow();
@@ -101,7 +102,10 @@ impl super::traits::TSystem for HGraphicsSystem {
         self.pipelines.clear();
     }
 
-    fn get_interested_components(&self) -> &'static [u32] {
-        &[COMPONENT_ID_STATIC_MODEL, COMPONENT_ID_TRANSFORM]
+    fn get_interested_components(&self) -> &'static [&'static [u32]] {
+        &[
+            &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_STATIC_MODEL],
+            &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_AXIS],
+        ]
     }
 }

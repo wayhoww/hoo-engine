@@ -23,6 +23,14 @@ pub struct FGraphicsPipeline {
 
     task_uniform_buffer: RcMut<FBuffer>,
     task_uniform_view: FBufferView,
+
+    cursor_uniform_buffer: RcMut<FBuffer>,
+    cursor_uniform_view: FBufferView,
+
+    readback_src_buffer: RcMut<FBuffer>,
+    readback_src_buffer_view: FBufferView,
+
+    readback_buffer: RcMut<FBuffer>,
 }
 
 #[derive(Clone, Debug)]
@@ -107,6 +115,22 @@ impl FGraphicsPipeline {
 
         let uav_tex_view = FTextureView::new(uav_tex.clone());
 
+        let readback_buffer = FBuffer::new_and_manage(BBufferUsages::MapRead);
+        readback_buffer.borrow_mut().resize(1024);
+
+        let readback_src_buffer =
+            FBuffer::new_and_manage(BBufferUsages::Storage | BBufferUsages::CopySrc);
+        readback_src_buffer.borrow_mut().resize(1024);
+
+        let readback_src_bufferview =
+            FBufferView::new_with_type(readback_src_buffer.clone(), EBufferViewType::Storage);
+
+        let cursor_uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
+        cursor_uniform_buffer
+            .borrow_mut()
+            .update_by_array(&[hoo_engine().borrow().get_editor().get_state().main_viewport_cursor_position.unwrap_or((0.0f32, 0.0f32))]);
+        let cursor_uniform_view = FBufferView::new_uniform(cursor_uniform_buffer.clone());
+
         Self {
             pass1,
             pass2,
@@ -117,10 +141,19 @@ impl FGraphicsPipeline {
             task_uniform_view,
             rt_color: FTextureView::new_swapchain_view(),
             uav: uav_tex_view,
+            readback_buffer: readback_buffer,
+            readback_src_buffer: readback_src_buffer,
+            readback_src_buffer_view: readback_src_bufferview,
+            cursor_uniform_buffer,
+            cursor_uniform_view,
         }
     }
 
     pub fn prepare(&mut self, context: &mut FPipelineContext) {
+        self.cursor_uniform_buffer
+            .borrow_mut()
+            .update_by_array(&[hoo_engine().borrow().get_editor().get_state().main_viewport_cursor_position.unwrap_or((0.0f32, 0.0f32))]);
+        
         let mat_view = {
             let camera_rotation: glm::Mat4 =
                 glm::make_mat3(&[-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0]).to_homogeneous();
@@ -266,8 +299,15 @@ impl FGraphicsPipeline {
         frame_encoder.encode_compute_pass(self.pass2.clone(), |mut pass_encoder| {
             pass_encoder
                 .get_bind_group_descriptor()
-                .add_unordered_access(2, self.uav.clone());
-            pass_encoder.dispatch(&self.compute_shader, (3, 1, 2));
+                .add_unordered_access(2, self.uav.clone())
+                .add_buffer(0, self.readback_src_buffer_view.clone());
+            pass_encoder.dispatch(&self.compute_shader, (3, 1, 2), &self.cursor_uniform_view);
+        });
+
+        frame_encoder.copy_buffer(&self.readback_src_buffer, &self.readback_buffer);
+
+        frame_encoder.read_back(&self.readback_buffer, |data: Option<Vec<f32>>| {
+            // println!("readback: {:?}", data);
         });
 
         // frame_encoder.encode_render_pass(self.cursor_pass.get_pass(self.rt_color.clone()), |mut pass_encoder| {
