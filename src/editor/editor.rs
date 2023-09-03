@@ -6,7 +6,7 @@ use crate::{
 
 pub struct FEditorState {
     pub overlay_mode: bool, // write_only
-    pub main_viewport_cursor_position: Option<(f32, f32)>,
+    pub main_viewport_cursor_position: Option<(f32, f32)>,  // readonly
 }
 
 impl FEditorState {
@@ -21,6 +21,9 @@ impl FEditorState {
 pub struct FEditor {
     pub main_viewport_texture: Option<RcMut<FTexture>>,
     pub state: FEditorState,
+
+    pub last_tick_time: std::time::Instant,
+    pub weighted_average_fps: f64,
 }
 
 pub fn toggle_ui(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
@@ -82,6 +85,8 @@ impl FEditor {
         Self {
             main_viewport_texture: None,
             state: FEditorState::new(),
+            last_tick_time: std::time::Instant::now(),
+            weighted_average_fps: 0.0,
         }
     }
 
@@ -110,9 +115,15 @@ impl FEditor {
             },
         );
 
+        let current_time = std::time::Instant::now();
+        let delta_time = current_time - self.last_tick_time;
+        self.last_tick_time = current_time;
+        self.weighted_average_fps = 0.9 * self.weighted_average_fps + 0.1 * (1_000_000.0 / delta_time.as_micros() as f64);
+
         egui::Window::new("Editor Setting").show(ctx, |ui| {
             ui.label("Overlay Mode");
             toggle_ui(ui, &mut self.state.overlay_mode);
+            ui.label(format!("FPS: {:.2}", self.weighted_average_fps));
         });
 
         if !self.state.overlay_mode {
