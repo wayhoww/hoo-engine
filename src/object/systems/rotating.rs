@@ -4,6 +4,8 @@ use hoo_object::RcObject;
 
 use crate::object::{components::*, space::HSpace};
 
+use super::FSystemTickContext;
+
 pub struct HRotatingSystem {
     counter: i64,
 }
@@ -19,15 +21,9 @@ impl super::traits::TSystem for HRotatingSystem {
         self.counter += 1;
     }
 
-    fn tick_entity(
-        &mut self,
-        _space: &HSpace,
-        _delta_time: f64,
-        _: usize,
-        components: Vec<hoo_object::RcTrait<dyn Any>>,
-    ) {
+    fn tick_entity(&mut self, context: FSystemTickContext) {
         let transform: RcObject<HTransformComponent> =
-            components[0].clone().try_downcast().unwrap();
+            context.components[0].clone().try_downcast().unwrap();
 
         let mut transform_ref = transform.borrow_mut();
 

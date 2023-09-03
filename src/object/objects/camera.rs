@@ -1,4 +1,6 @@
-use crate::{device::graphics::FTexture, hoo_engine, utils::RcMut, graphics::FPipelineContext, rcmut};
+use crate::{
+    device::graphics::FTexture, graphics::FPipelineContext, hoo_engine, rcmut, utils::RcMut,
+};
 
 #[derive(Clone)]
 pub enum FCameraProjection {

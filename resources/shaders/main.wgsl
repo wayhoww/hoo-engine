@@ -18,6 +18,7 @@ struct VertexOut {
 
     @location(1) normal_world : vec3f,
     @location(2) position_world : vec3f,
+    @location(3) object_id: u32,
 };
 
 struct FragmentOut {
@@ -30,6 +31,7 @@ struct DrawCallUniform {
     transform_m: mat4x4f,
     transform_mv: mat4x4f,
     transform_mvp: mat4x4f,
+    object_id: u32,
 };
 
 struct ShaderLight {
@@ -66,6 +68,7 @@ fn vsMain_base(
 
     vertex_out.normal_world = (cDrawCall.transform_m * vec4f(normal, 0.0)).xyz;
     vertex_out.position_world = to_vec3f(cDrawCall.transform_m * vec4f(pos.xyz, 1.0));
+    vertex_out.object_id = cDrawCall.object_id;
     return vertex_out;
 }
 
@@ -104,6 +107,19 @@ fn fsMain_base(vertex_out: VertexOut) -> FragmentOut {
 
     var fragment_out: FragmentOut;
     fragment_out.color = vec4f(out, 1.0);
-    fragment_out.object_id = 10086u;
+    fragment_out.object_id = vertex_out.object_id;
     return fragment_out;
+}
+
+
+@vertex
+fn vsMain_model_axis(
+    @location(0) pos: vec3f, 
+) -> @builtin(position) vec4f {
+    return cDrawCall.transform_mvp * vec4f(pos.xyz, 1.0);
+}
+
+@fragment
+fn fsMain_model_axis() -> @location(0) vec4f {
+    return vec4f(1.0, 0.0, 0.0, 1.0);
 }

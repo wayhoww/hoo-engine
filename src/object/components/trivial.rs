@@ -1,5 +1,14 @@
-use crate::object::*;
+use std::{cell::RefCell, ops::Deref};
+
+use crate::{
+    object::{
+        objects::{HMaterial, HStaticMesh, HStaticModel},
+        *,
+    },
+    utils::RcMut,
+};
 use hoo_object::RcObject;
+use lazy_static::lazy_static;
 use nalgebra_glm as glm;
 
 pub const COMPONENT_ID_STATIC_MODEL: u32 = 0;
@@ -69,3 +78,30 @@ pub struct HLightComponent {
 }
 
 pub struct HAxisComponent {} // empty
+
+impl HAxisComponent {
+    pub fn GetAxisModel() -> RcObject<HStaticModel> {
+        thread_local! {
+            static MODEL: RefCell<Option<RcObject<HStaticModel>>> = RefCell::new(None);
+        }
+
+        let out = MODEL.with(|static_model| {
+            let mut static_model = static_model.borrow_mut();
+            if let Some(static_model) = static_model.deref() {
+                return static_model.clone();
+            } else {
+                let mesh = HStaticMesh::new("meshes/arrow.gltf");
+                let mut material = HMaterial::new("shaders/main.wgsl");
+                material.material.enable_shader_profile("model_axis".into());
+                let model = RcObject::new(HStaticModel {
+                    mesh: RcObject::new(mesh),
+                    material: RcObject::new(material),
+                });
+                static_model.replace(model.clone());
+                return model;
+            }
+        });
+
+        out
+    }
+}

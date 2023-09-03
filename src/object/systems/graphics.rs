@@ -2,14 +2,17 @@ use std::any::Any;
 
 use hoo_object::RcObject;
 
+use nalgebra_glm as glm;
+
 use crate::{
-    device::graphics::FRenderObject,
+    device::graphics::{FRenderObject, BRenderObjectFlags},
     graphics::FPipelineContext,
     hoo_engine,
-    object::{components::*, objects::HCameraTarget, space::HSpace}, utils::RcMut,
+    object::{components::*, objects::HCameraTarget, space::HSpace},
+    utils::RcMut,
 };
 
-use super::{HCameraSystem, HLightingSystem};
+use super::{FSystemTickContext, HCameraSystem, HLightingSystem};
 
 pub struct HGraphicsSystem {
     pipelines: Vec<RcMut<FPipelineContext>>,
@@ -32,6 +35,7 @@ impl super::traits::TSystem for HGraphicsSystem {
         if let Some(camera_system) = camera_systems.first() {
             for (camera, transform) in camera_system.borrow().cameras.iter() {
                 let camera = camera.borrow();
+
                 let projection_mat = {
                     let mut proj = camera.camera_projection.clone();
                     if camera.auto_aspect {
@@ -58,30 +62,74 @@ impl super::traits::TSystem for HGraphicsSystem {
         }
     }
 
-    fn tick_entity(
-        &mut self,
-        _space: &HSpace,
-        _delta_time: f64,
-        _: usize,
-        components: Vec<hoo_object::RcTrait<dyn Any>>,
-    ) {
-        let transform: RcObject<HTransformComponent> =
-            components[0].clone().try_downcast().unwrap();
-        let static_model: RcObject<HStaticModelComponent> =
-            components[1].clone().try_downcast().unwrap();
+    fn tick_entity(&mut self, context: FSystemTickContext) {
+        if context.group == 1 {
+            let transform: RcObject<HTransformComponent> =
+                context.components[0].clone().try_downcast().unwrap();
+            let static_model: RcObject<HStaticModelComponent> =
+                context.components[1].clone().try_downcast().unwrap();
 
-        let transform_ref = transform.borrow();
+            let transform_ref = transform.borrow();
 
-        // todo: better api?
-        let transform = transform_ref.get_matrix();
+            // todo: better api?
+            let transform = transform_ref.get_matrix();
 
-        // TODO: model 和 material 为啥要 view 呢？
-        let model = static_model.borrow().model.borrow().assemble_model();
+            // TODO: model 和 material 为啥要 view 呢？
+            let model = static_model.borrow().model.borrow().assemble_model();
 
-        for pipeline in self.pipelines.iter_mut() {
-            let mut render_object = FRenderObject::new(model.clone());
-            render_object.set_transform_model(transform);
-            pipeline.borrow_mut().data.borrow_mut().add_render_object(render_object);
+            for pipeline in self.pipelines.iter_mut() {
+                let mut render_object = FRenderObject::new(model.clone());
+                render_object.set_transform_model(transform);
+                // TODO: 理论上 entity id 和 object id 是不一样的，要考虑单个 entity 多个 mesh 的情况
+                render_object.set_object_id(context.entity_id);
+                pipeline
+                    .borrow_mut()
+                    .data
+                    .borrow_mut()
+                    .add_render_object(render_object);
+            }
+        } else if context.group == 0 && Some(context.entity_id) == context.space.selected_entity_id {
+            
+            let transform: RcObject<HTransformComponent> =
+                context.components[0].clone().try_downcast().unwrap();
+
+            let transform_ref = transform.borrow();
+            let transform = transform_ref.get_matrix();
+
+            let obj_model = HAxisComponent::GetAxisModel();
+            let model = obj_model.borrow().assemble_model();
+
+            for pipeline in self.pipelines.iter_mut() {
+                let pipeline = pipeline.borrow_mut();
+                let mut pipeline = pipeline.data.borrow_mut();
+
+                let scale_matrix = glm::scaling(&glm::vec3(0.1, 0.1, 0.1));
+                
+                // x
+                {   
+                    let mut render_object = FRenderObject::new(model.clone());
+                    render_object.set_transform_model(transform * glm::rotation(90f32.to_radians(), &glm::vec3(0.0, 0.0, 1.0)) * scale_matrix);
+                    render_object.set_flags(BRenderObjectFlags::MODEL_AXIS);
+                    pipeline.add_render_object(render_object);
+                }
+
+                // y
+                {
+                    let mut render_object = FRenderObject::new(model.clone());
+                    render_object.set_transform_model(transform * glm::rotation(180f32.to_radians(), &glm::vec3(0.0, 0.0, 1.0)) * scale_matrix);
+                    render_object.set_flags(BRenderObjectFlags::MODEL_AXIS);
+                    pipeline.add_render_object(render_object);
+
+                }
+
+                // z
+                {
+                    let mut render_object = FRenderObject::new(model.clone());
+                    render_object.set_transform_model(transform * glm::rotation(90f32.to_radians(), &glm::vec3(1.0, 0.0, 0.0)) * scale_matrix);
+                    render_object.set_flags(BRenderObjectFlags::MODEL_AXIS);
+                    pipeline.add_render_object(render_object);
+                }
+            }
         }
     }
 
@@ -92,7 +140,11 @@ impl super::traits::TSystem for HGraphicsSystem {
             if let Some(lighting_system) = lighting_system.first() {
                 let lighting_system = lighting_system.borrow();
                 let lights = lighting_system.get_lights();
-                pipeline.borrow_mut().data.borrow_mut().set_lights(lights.clone());
+                pipeline
+                    .borrow_mut()
+                    .data
+                    .borrow_mut()
+                    .set_lights(lights.clone());
 
                 hoo_engine()
                     .borrow()
@@ -106,8 +158,8 @@ impl super::traits::TSystem for HGraphicsSystem {
 
     fn get_interested_components(&self) -> &'static [&'static [u32]] {
         &[
+            &[COMPONENT_ID_TRANSFORM],
             &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_STATIC_MODEL],
-            &[COMPONENT_ID_TRANSFORM, COMPONENT_ID_AXIS],
         ]
     }
 }

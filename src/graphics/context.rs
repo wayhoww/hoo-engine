@@ -9,10 +9,11 @@ use nalgebra_glm as glm;
 use crate::{
     device::graphics::{FDeviceEncoder, FFrameEncoder, FRenderObject},
     hoo_engine,
-    object::objects::{FShaderLight, HCameraTarget}, utils::RcMut,
+    object::objects::{FShaderLight, HCameraTarget},
+    utils::RcMut,
 };
 
-use super::{FGraphicsPipeline, pipeline};
+use super::{pipeline, FGraphicsPipeline};
 
 pub struct FGraphicsContext {
     pipelines: Vec<RcMut<FPipelineContext>>,

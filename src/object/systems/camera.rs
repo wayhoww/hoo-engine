@@ -7,7 +7,7 @@ use crate::{
     object::{components::*, objects::HCamera, space::HSpace},
 };
 
-use super::HGraphicsSystem;
+use super::{FSystemTickContext, HGraphicsSystem};
 
 // 有实际需求的时候再考虑多相机的问题，修改不是很大
 // 初步思路是：
@@ -28,20 +28,15 @@ impl HCameraSystem {
 }
 
 impl super::traits::TSystem for HCameraSystem {
-    fn tick_entity(
-        &mut self,
-        space: &HSpace,
-        _delta_time: f64,
-        _: usize,
-        components: Vec<hoo_object::RcTrait<dyn Any>>,
-    ) {
+    fn tick_entity(&mut self, context: FSystemTickContext) {
         // 这段代码太麻烦了，试试看用宏简化？
 
         let transform: RcObject<HTransformComponent> =
-            components[0].clone().try_downcast().unwrap();
+            context.components[0].clone().try_downcast().unwrap();
         let transform_ref = transform.borrow();
 
-        let camera: RcObject<HCameraComponent> = components[1].clone().try_downcast().unwrap();
+        let camera: RcObject<HCameraComponent> =
+            context.components[1].clone().try_downcast().unwrap();
         let camera_ref = camera.borrow_mut();
         if camera_ref.main_camera {
             camera_ref.camera.borrow_mut().target = hoo_engine()
@@ -55,36 +50,6 @@ impl super::traits::TSystem for HCameraSystem {
             camera_ref.camera.clone(),
             transform_ref.get_matrix_ignoring_scale(),
         ));
-
-        // if self.found {
-        //     todo!("log error here");
-        // } else {
-        //     self.found = true;
-        // TODO: multiple viewport in a same space
-        // let graphics_systems = space.get_systems_by_type::<HGraphicsSystem>();
-
-        // for sys in graphics_systems {
-        //     let transform_mat = transform_ref.get_matrix_ignoring_scale();
-        //     let projection_mat = {
-        //         let mut proj = camera_desc.camera_projection.clone();
-        //         if camera_ref.auto_aspect {
-        //             let swapchain_size =
-        //                 hoo_engine().borrow().get_renderer().get_swapchain_size();
-        //             let aspect_ratio = 1.0 * swapchain_size.0 as f32 / swapchain_size.1 as f32;
-        //             proj.set_aspect_ratio(aspect_ratio);
-        //         }
-        //         proj.get_projection_matrix()
-        //     };
-
-        //     let mut sys_ref = sys.borrow_mut();
-        //     sys_ref
-        //         .get_context_mut()
-        //         .set_camera_transform(transform_mat);
-        //     sys_ref
-        //         .get_context_mut()
-        //         .set_camera_projection(projection_mat);
-        // }
-        // }
     }
 
     fn begin_frame(&mut self, _: &HSpace) {

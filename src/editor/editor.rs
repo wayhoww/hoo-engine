@@ -5,8 +5,8 @@ use crate::{
 };
 
 pub struct FEditorState {
-    pub overlay_mode: bool, // write_only
-    pub main_viewport_cursor_position: Option<(f32, f32)>,  // readonly
+    pub overlay_mode: bool,                                // write_only
+    pub main_viewport_cursor_position: Option<(f32, f32)>, // readonly
 }
 
 impl FEditorState {
@@ -103,7 +103,10 @@ impl FEditor {
             self.state.main_viewport_cursor_position = ctx.pointer_hover_pos().map(|pos| {
                 let rect = ctx.available_rect();
                 self.state.main_viewport_cursor_position = Some((pos.x, pos.y));
-                ((pos.x - rect.left()) * gctx.get_scale_factor(), (pos.y - rect.top()) * gctx.get_scale_factor())
+                (
+                    (pos.x - rect.left()) * gctx.get_scale_factor(),
+                    (pos.y - rect.top()) * gctx.get_scale_factor(),
+                )
             });
         }
 
@@ -118,7 +121,8 @@ impl FEditor {
         let current_time = std::time::Instant::now();
         let delta_time = current_time - self.last_tick_time;
         self.last_tick_time = current_time;
-        self.weighted_average_fps = 0.9 * self.weighted_average_fps + 0.1 * (1_000_000.0 / delta_time.as_micros() as f64);
+        self.weighted_average_fps =
+            0.9 * self.weighted_average_fps + 0.1 * (1_000_000.0 / delta_time.as_micros() as f64);
 
         egui::Window::new("Editor Setting").show(ctx, |ui| {
             ui.label("Overlay Mode");
@@ -130,9 +134,12 @@ impl FEditor {
             egui::panel::CentralPanel::default().show(ctx, |ui| {
                 if let Some(tex) = self.main_viewport_texture.as_ref() {
                     let image = gctx.image(ui, tex);
-                    let pointer_pos = image
-                        .hover_pos()
-                        .map(|pos| ((pos.x - image.rect.left()) * gctx.get_scale_factor(), (pos.y - image.rect.top()) * gctx.get_scale_factor()));
+                    let pointer_pos = image.hover_pos().map(|pos| {
+                        (
+                            (pos.x - image.rect.left()) * gctx.get_scale_factor(),
+                            (pos.y - image.rect.top()) * gctx.get_scale_factor(),
+                        )
+                    });
                     self.state.main_viewport_cursor_position = pointer_pos;
                 } else {
                     ui.label("No viewport texture");

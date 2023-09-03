@@ -643,7 +643,7 @@ impl ELoadOp {
                 b: _,
                 a: _,
             } => unimplemented!("float4 clear value"),
-            FClearValue::Float(x) => x,
+            FClearValue::Float(x) => x as f32,
         })
     }
 }
@@ -1076,7 +1076,7 @@ pub enum FClearValue {
         b: f32,
         a: f32,
     },
-    Float(f32),
+    Float(f64),
 }
 
 impl FClearValue {
@@ -1084,7 +1084,7 @@ impl FClearValue {
         Self::Float4 { r, g, b, a }
     }
 
-    pub fn new_float(x: f32) -> Self {
+    pub fn new_float(x: f64) -> Self {
         Self::Float(x)
     }
 }
@@ -1378,6 +1378,7 @@ struct DrawCallUniform {
     transform_m: glm::Mat4x4,
     transform_mv: glm::Mat4x4,
     transform_mvp: glm::Mat4x4,
+    object_id: u32,
 }
 
 impl Default for DrawCallUniform {
@@ -1386,6 +1387,7 @@ impl Default for DrawCallUniform {
             transform_m: glm::identity(),
             transform_mv: glm::identity(),
             transform_mvp: glm::identity(),
+            object_id: u32::MAX,
         }
     }
 }
@@ -1410,6 +1412,15 @@ impl FModel {
     }
 }
 
+
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct BRenderObjectFlags: u32 {
+        const NORMAL_OPAQUE = 0x1;
+        const MODEL_AXIS = 0x2;
+    }
+}
+
 #[derive(Clone)]
 pub struct FRenderObject {
     model: FModel,
@@ -1418,12 +1429,16 @@ pub struct FRenderObject {
     transform_m: glm::Mat4x4,
     transform_v: glm::Mat4x4,
     transform_p: glm::Mat4x4,
+
+    object_id: u32,
+    
+    flags: BRenderObjectFlags,
 }
 
 impl FRenderObject {
     pub fn new(model: FModel) -> Self {
         // TODO: 这个资源不可以每帧创建
-        
+
         let uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
 
         let uniform_struct = DrawCallUniform::default();
@@ -1440,6 +1455,8 @@ impl FRenderObject {
             transform_m: glm::identity(),
             transform_v: glm::identity(),
             transform_p: glm::identity(),
+            object_id: u32::MAX,
+            flags: BRenderObjectFlags::NORMAL_OPAQUE,
         };
 
         out.update_uniform_buffer();
@@ -1462,6 +1479,20 @@ impl FRenderObject {
         self
     }
 
+    pub fn set_object_id(&mut self, object_id: u32) -> &mut Self {
+        self.object_id = object_id;
+        self
+    }
+
+    pub fn set_flags(&mut self, flags: BRenderObjectFlags) -> &mut Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn get_flags(&self) -> BRenderObjectFlags {
+        self.flags
+    }
+
     pub fn get_transform_model(&self) -> glm::Mat4x4 {
         self.transform_m
     }
@@ -1471,6 +1502,7 @@ impl FRenderObject {
         uniform_struct.transform_m = self.transform_m;
         uniform_struct.transform_mv = self.transform_v * self.transform_m;
         uniform_struct.transform_mvp = self.transform_p * self.transform_v * self.transform_m;
+        uniform_struct.object_id = self.object_id;
         self.uniform_view
             .get_buffer()
             .borrow_mut()

@@ -4,6 +4,8 @@ use hoo_object::RcObject;
 
 use crate::object::{components::*, objects::FShaderLight, space::HSpace};
 
+use super::FSystemTickContext;
+
 pub struct HLightingSystem {
     lights: Vec<FShaderLight>,
 }
@@ -27,18 +29,13 @@ impl super::traits::TSystem for HLightingSystem {
         // end-frame 后，其他 system 会从中读取数据
     }
 
-    fn tick_entity(
-        &mut self,
-        _space: &HSpace,
-        _delta_time: f64,
-        _: usize,
-        components: Vec<hoo_object::RcTrait<dyn Any>>,
-    ) {
+    fn tick_entity(&mut self, context: FSystemTickContext) {
         let transform: RcObject<HTransformComponent> =
-            components[0].clone().try_downcast().unwrap();
+            context.components[0].clone().try_downcast().unwrap();
         let transform_ref = transform.borrow();
 
-        let light: RcObject<HLightComponent> = components[1].clone().try_downcast().unwrap();
+        let light: RcObject<HLightComponent> =
+            context.components[1].clone().try_downcast().unwrap();
         let light_ref = light.borrow();
         let light_desc = light_ref.light.borrow();
 
