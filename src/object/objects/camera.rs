@@ -1,4 +1,4 @@
-use crate::{device::graphics::FTexture, hoo_engine, utils::RcMut};
+use crate::{device::graphics::FTexture, hoo_engine, utils::RcMut, graphics::FPipelineContext, rcmut};
 
 #[derive(Clone)]
 pub enum FCameraProjection {
@@ -79,6 +79,7 @@ pub enum HCameraTarget {
 }
 
 pub struct HCamera {
+    pub context: RcMut<FPipelineContext>,
     pub camera_projection: FCameraProjection,
     pub auto_aspect: bool,
     pub target: HCameraTarget,
@@ -87,6 +88,7 @@ pub struct HCamera {
 impl HCamera {
     pub fn new(camera_projection: FCameraProjection) -> Self {
         Self {
+            context: rcmut!(FPipelineContext::new()),
             camera_projection,
             auto_aspect: true,
             target: hoo_engine()

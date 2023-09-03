@@ -7,7 +7,7 @@ use crate::{hoo_engine, utils::*};
 use nalgebra_glm as glm;
 
 use super::affiliate::FCursorPass;
-use super::FPipelineContext;
+use super::FPipelineContextData;
 
 pub struct FGraphicsPipeline {
     pass1: FGraphicsPass,
@@ -172,7 +172,7 @@ impl FGraphicsPipeline {
         }
     }
 
-    pub fn prepare(&mut self, context: &mut FPipelineContext) {
+    pub fn prepare(&mut self, context: &mut FPipelineContextData) {
         let mat_view = {
             let camera_rotation: glm::Mat4 =
                 glm::make_mat3(&[-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0]).to_homogeneous();
@@ -254,7 +254,7 @@ impl FGraphicsPipeline {
         });
     }
 
-    pub fn draw(&mut self, frame_encoder: &mut FFrameEncoder, context: &mut FPipelineContext) {
+    pub fn draw(&mut self, frame_encoder: &mut FFrameEncoder, context: &mut FPipelineContextData) {
         // encoder.encode_frame(|frame_encoder| {
         // let swapchain_image_view = FTextureView::new_swapchain_view();
 
@@ -273,6 +273,31 @@ impl FGraphicsPipeline {
 
         // self.pass2.set_color_attachments(vec![FAttachment::new(
         //     swapchain_image_view.clone(),
+        // frame_encoder.set_task_uniform_buffer_view(self.task_uniform_view.clone());
+
+        // frame_encoder.encode_render_pass(self.pass1.clone(), |mut pass_encoder| {
+        //     // self.render_object1.encode(pass_encoder, "base");
+
+        //     for render_object in context.render_objects.iter() {
+        //         render_object.encode(&mut pass_encoder, "base");
+        //     }
+        // });
+
+        // frame_encoder.encode_compute_pass(self.pass2.clone(), |mut pass_encoder| {
+        //     pass_encoder
+        //         .get_bind_group_descriptor()
+        //         .add_buffer(0, self.readback_src_buffer_view.clone())
+        //         .add_sampled_texture(1, self.rt_object_id.clone());
+        //     // .add_unordered_access(3, self.uav.clone());
+        //     pass_encoder.dispatch(&self.compute_shader, (3, 1, 2), &self.cursor_uniform_view);
+        // });
+
+        // frame_encoder.copy_buffer(&self.readback_src_buffer, &self.readback_buffer);
+
+        // frame_encoder.read_back(&self.readback_buffer, |data: Option<Vec<u32>>| {
+        //     println!("readback: {:?}", data);
+        // });
+
         //     ELoadOp::Load,
         //     EStoreOp::Store,
         // )]);

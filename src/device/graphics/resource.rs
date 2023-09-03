@@ -1422,6 +1422,8 @@ pub struct FRenderObject {
 
 impl FRenderObject {
     pub fn new(model: FModel) -> Self {
+        // TODO: 这个资源不可以每帧创建
+        
         let uniform_buffer = FBuffer::new_and_manage(BBufferUsages::Uniform);
 
         let uniform_struct = DrawCallUniform::default();

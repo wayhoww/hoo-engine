@@ -1,7 +1,7 @@
 use crate::*;
 use crate::{device::graphics::*, object::objects::HCameraTarget};
 
-use super::{FGraphicsContext, FPipelineContext};
+use super::{FGraphicsContext, FPipelineContextData, FPipelineContext};
 
 pub struct Renderer {
     // // resources
@@ -32,7 +32,7 @@ impl Renderer {
         self.graphics_encoder.prepare();
     }
 
-    pub fn submit_pipeline(&self, pipeline_context: FPipelineContext) {
+    pub fn submit_pipeline(&self, pipeline_context: RcMut<FPipelineContext>) {
         self.graphics_context
             .borrow_mut()
             .submit_pipeline(pipeline_context);

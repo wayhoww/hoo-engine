@@ -6,13 +6,13 @@ use crate::{
     device::graphics::FRenderObject,
     graphics::FPipelineContext,
     hoo_engine,
-    object::{components::*, objects::HCameraTarget, space::HSpace},
+    object::{components::*, objects::HCameraTarget, space::HSpace}, utils::RcMut,
 };
 
 use super::{HCameraSystem, HLightingSystem};
 
 pub struct HGraphicsSystem {
-    pipelines: Vec<FPipelineContext>,
+    pipelines: Vec<RcMut<FPipelineContext>>,
 }
 
 impl HGraphicsSystem {
@@ -47,11 +47,13 @@ impl super::traits::TSystem for HGraphicsSystem {
                     proj.get_projection_matrix()
                 };
 
-                let mut pipeline = FPipelineContext::new();
+                let context_ref = camera.context.borrow_mut();
+                let mut pipeline = context_ref.data.borrow_mut();
                 pipeline.camera_transform = *transform;
                 pipeline.camera_projection = projection_mat;
                 pipeline.set_render_target(camera.target.clone());
-                self.pipelines.push(pipeline);
+
+                self.pipelines.push(camera.context.clone());
             }
         }
     }
@@ -79,18 +81,18 @@ impl super::traits::TSystem for HGraphicsSystem {
         for pipeline in self.pipelines.iter_mut() {
             let mut render_object = FRenderObject::new(model.clone());
             render_object.set_transform_model(transform);
-            pipeline.add_render_object(render_object);
+            pipeline.borrow_mut().data.borrow_mut().add_render_object(render_object);
         }
     }
 
     fn end_frame(&mut self, space: &HSpace) {
         let lighting_system = space.get_executed_systems_by_type::<HLightingSystem>();
 
-        for mut pipeline in self.pipelines.clone() {
+        for pipeline in self.pipelines.clone() {
             if let Some(lighting_system) = lighting_system.first() {
                 let lighting_system = lighting_system.borrow();
                 let lights = lighting_system.get_lights();
-                pipeline.set_lights(lights.clone());
+                pipeline.borrow_mut().data.borrow_mut().set_lights(lights.clone());
 
                 hoo_engine()
                     .borrow()
